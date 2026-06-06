@@ -36,13 +36,12 @@ class RouteForgeOrchestrator:
 
     def __init__(self) -> None:
         pat = get_secret("GITLAB_PAT")
-        mcp_token = get_secret("GITLAB_MCP_OAUTH_TOKEN")
         project_id = gcp_project()
         location = vertex_location()
 
         self._watcher = CommitWatcher(gitlab_pat=pat, gitlab_project_id="82762386")
         self._tester = ScenarioTester()
-        self._analyzer = CodeContextAnalyzer(mcp_oauth_token=mcp_token)
+        self._analyzer = CodeContextAnalyzer(gitlab_pat=pat)
         self._gate = RiskGate(project_id=project_id, location=location)
         self._writer = ChangelogWriter(project_id=project_id, location=location)
         self._critic = Critic(project_id=project_id, location=location)

@@ -1,18 +1,25 @@
-"""CodeContextAnalyzer — semantic_code_search via GitLab MCP (HTTP transport)."""
+"""CodeContextAnalyzer — search_project_code via zereight/gitlab-mcp (Streamable HTTP)."""
 from __future__ import annotations
 
 import dataclasses
+import os
 import re
 from typing import Any
 
 import httpx
+import structlog
 
-from agent.config import GITLAB_MCP_ENDPOINT
+log = structlog.get_logger()
 
 # Matches Python/Go/TS function definitions
 _FUNC_PATTERN = re.compile(
     r"(?:^|\+)\s*(?:def|func|function|async def)\s+(\w+)",
     re.MULTILINE,
+)
+
+_MCP_URL = os.environ.get(
+    "ZEREIGHT_MCP_URL",
+    "https://routeforge-mcp-336382452417.us-central1.run.app/mcp",
 )
 
 
@@ -24,8 +31,8 @@ class CodeContext:
 
 
 class CodeContextAnalyzer:
-    def __init__(self, mcp_oauth_token: str) -> None:
-        self._token = mcp_oauth_token
+    def __init__(self, gitlab_pat: str) -> None:
+        self._pat = gitlab_pat
 
     async def analyze(
         self, diffs: list[dict[str, Any]], project_id: str
@@ -34,26 +41,9 @@ class CodeContextAnalyzer:
         query = self._build_search_query(diffs, changed_fns)
 
         try:
-            mcp_result = await self._call_mcp_tool(
-                "semantic_code_search",
-                {
-                    "query": query,
-                    "project_id": project_id,
-                    "limit": 10,
-                },
-            )
-            results = mcp_result.get("results", [])
-        except httpx.HTTPStatusError as exc:
-            # MCP OAuth token not yet provisioned — degrade gracefully.
-            # Pipeline continues with diff-only context; semantic_code_search
-            # will be re-enabled once GITLAB_MCP_OAUTH_TOKEN is set via
-            # `npx routeforge init`.
-            import structlog
-            structlog.get_logger().warning(
-                "mcp.unavailable",
-                status=exc.response.status_code,
-                url=str(exc.request.url),
-            )
+            results = await self._search_project_code(query, project_id)
+        except Exception as exc:
+            log.warning("mcp.unavailable", error=str(exc), url=_MCP_URL)
             results = []
 
         return CodeContext(
@@ -63,29 +53,71 @@ class CodeContextAnalyzer:
         )
 
     # ------------------------------------------------------------------
-    # MCP HTTP transport
+    # MCP Streamable HTTP — initialize + tools/call
     # ------------------------------------------------------------------
 
-    async def _call_mcp_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
-        """Call a GitLab MCP tool via HTTP transport."""
-        payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": tool_name, "arguments": params},
+    async def _search_project_code(
+        self, query: str, project_id: str
+    ) -> list[dict[str, Any]]:
+        base_headers = {
+            "Private-Token": self._pat,
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
         }
+
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                GITLAB_MCP_ENDPOINT,
-                json=payload,
-                headers={
-                    "Authorization": f"Bearer {self._token}",
-                    "Content-Type": "application/json",
+            # Step 1: initialize — server assigns session ID in response header
+            init_resp = await client.post(
+                _MCP_URL,
+                headers=base_headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "routeforge", "version": "1.0.0"},
+                    },
                 },
             )
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("result", {})
+            init_resp.raise_for_status()
+            session_id = init_resp.headers.get("mcp-session-id", "")
+            session_headers = {**base_headers, "mcp-session-id": session_id}
+
+            # Step 2: notifications/initialized
+            await client.post(
+                _MCP_URL,
+                headers=session_headers,
+                json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            )
+
+            # Step 3: call search_project_code
+            call_resp = await client.post(
+                _MCP_URL,
+                headers=session_headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "search_project_code",
+                        "arguments": {
+                            "project_id": str(project_id),
+                            "search": query,
+                        },
+                    },
+                },
+            )
+            call_resp.raise_for_status()
+
+        data = call_resp.json()
+        content = data.get("result", {}).get("content", [])
+        results = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                results.append({"text": item.get("text", ""), "score": 0.8})
+        return results
 
     # ------------------------------------------------------------------
     # Helpers
@@ -94,15 +126,12 @@ class CodeContextAnalyzer:
     def _extract_changed_functions(self, diffs: list[dict[str, Any]]) -> list[str]:
         fns: list[str] = []
         for diff in diffs:
-            diff_text = diff.get("diff", "")
-            fns.extend(_FUNC_PATTERN.findall(diff_text))
-        return list(dict.fromkeys(fns))  # deduplicate, preserve order
+            fns.extend(_FUNC_PATTERN.findall(diff.get("diff", "")))
+        return list(dict.fromkeys(fns))
 
     def _build_search_query(
         self, diffs: list[dict[str, Any]], changed_fns: list[str]
     ) -> str:
-        files = " ".join(
-            d.get("new_path", "") for d in diffs if d.get("new_path")
-        )
+        files = " ".join(d.get("new_path", "") for d in diffs if d.get("new_path"))
         fns = " ".join(changed_fns)
         return f"routing algorithm strait crisis {fns} {files}".strip()

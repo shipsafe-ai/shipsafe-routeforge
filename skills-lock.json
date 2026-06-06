@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "gitlab-mcp-skill": {
+      "source": "zereight/gitlab-mcp",
+      "sourceType": "github",
+      "skillPath": "skills/gitlab-mcp/SKILL.md",
+      "computedHash": "b428ab5ac792e8a2cafd5a40a135c0fe6c31c0530d462f940aede85b598f8885"
+    }
+  }
+}
