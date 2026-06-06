@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ShieldCheck, ShieldX, Clock, Loader2, ExternalLink,
-  GitMerge, AlertCircle, TrendingUp, CheckCircle2,
+  GitMerge, AlertCircle, TrendingUp, CheckCircle2, Lightbulb, Plus,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState, useRef } from "react";
@@ -22,6 +22,17 @@ interface PipelineStatus {
   coverage: number | null;
 }
 
+interface SuggestedScenario {
+  scenario_id: string;
+  description: string;
+  crisis_mode: boolean;
+  strait_id: string;
+  expected_blocked: boolean;
+  expected_rerouted?: boolean;
+  cargo_type?: string;
+  rationale: string;
+}
+
 interface Verdict {
   mr_iid: number;
   mr_title: string;
@@ -33,13 +44,16 @@ interface Verdict {
   comment_draft: string;
   injection_blocked: boolean;
   posted: boolean;
+  mr_approved?: boolean;
   timestamp: string;
   pipeline_status?: PipelineStatus;
   issue_url?: string;
+  work_item_url?: string;
   changed_functions?: string[];
   throughput_delta_pct?: number;
   scenarios_passed?: number;
   scenarios_total?: number;
+  suggested_scenarios?: SuggestedScenario[];
 }
 
 async function fetchVerdicts(): Promise<Verdict[]> {
@@ -57,6 +71,17 @@ async function createIssue(mr_iid: number): Promise<{ issue_url: string }> {
   const r = await fetch(`${API}/verdicts/${mr_iid}/create-issue`, { method: "POST" });
   if (!r.ok) throw new Error("Issue creation failed");
   return r.json();
+}
+
+async function createWorkItem(mr_iid: number): Promise<{ work_item_url: string }> {
+  const r = await fetch(`${API}/verdicts/${mr_iid}/create-work-item`, { method: "POST" });
+  if (!r.ok) throw new Error("Work item creation failed");
+  return r.json();
+}
+
+async function acceptSuggestion(mr_iid: number, idx: number): Promise<void> {
+  const r = await fetch(`${API}/verdicts/${mr_iid}/suggestions/${idx}/accept`, { method: "POST" });
+  if (!r.ok) throw new Error("Failed to add scenario");
 }
 
 function VerdictBadge({ verdict }: { verdict: VerdictEnum }) {
@@ -158,6 +183,16 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["verdicts"] }),
   });
 
+  const makeWorkItem = useMutation({
+    mutationFn: () => createWorkItem(card.mr_iid),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["verdicts"] }),
+  });
+
+  const addSuggestion = useMutation({
+    mutationFn: (idx: number) => acceptSuggestion(card.mr_iid, idx),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["scenarios"] }),
+  });
+
   const ts = new Date(card.timestamp).toLocaleString();
 
   return (
@@ -205,7 +240,7 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
           </div>
           {card.posted && (
             <span className="text-blue-400 text-xs flex items-center gap-0.5">
-              <GitMerge size={10} /> posted
+              <GitMerge size={10} /> {card.mr_approved ? "approved" : "posted"}
             </span>
           )}
         </div>
@@ -331,7 +366,37 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
                 </div>
               </div>
 
-              {/* Issue link */}
+              {/* AI-suggested scenarios */}
+              {(card.suggested_scenarios?.length ?? 0) > 0 && (
+                <div>
+                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5 flex items-center gap-1">
+                    <Lightbulb size={11} className="text-yellow-400" /> Suggested scenarios
+                  </p>
+                  <div className="space-y-2">
+                    {card.suggested_scenarios!.map((s, idx) => (
+                      <div key={s.scenario_id} className="flex items-start gap-2 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2">
+                        <div className="flex-1 min-w-0">
+                          <span className="font-mono text-xs text-gray-300">{s.scenario_id}</span>
+                          {s.crisis_mode && (
+                            <span className="ml-1.5 text-xs bg-red-950/50 border border-red-900/50 text-red-400 px-1 rounded">crisis</span>
+                          )}
+                          <p className="text-xs text-gray-500 mt-0.5 truncate">{s.description}</p>
+                          <p className="text-xs text-yellow-600 mt-0.5 italic">{s.rationale}</p>
+                        </div>
+                        <button
+                          onClick={() => addSuggestion.mutate(idx)}
+                          disabled={addSuggestion.isPending}
+                          className="flex-shrink-0 flex items-center gap-1 text-xs text-brand hover:text-orange-400 border border-brand/40 hover:border-orange-400 rounded px-2 py-1 transition-colors disabled:opacity-40"
+                        >
+                          <Plus size={10} /> Add
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Issue / Work Item links */}
               {card.issue_url && (
                 <a
                   href={card.issue_url}
@@ -342,9 +407,19 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
                   <ExternalLink size={11} /> View tracking issue
                 </a>
               )}
+              {card.work_item_url && (
+                <a
+                  href={card.work_item_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-purple-400 hover:underline"
+                >
+                  <ExternalLink size={11} /> View work item (GitLab Ultimate)
+                </a>
+              )}
 
               {/* Actions */}
-              <div className="flex gap-2 pt-1">
+              <div className="flex flex-wrap gap-2 pt-1">
                 {!card.posted && (
                   <button
                     onClick={() => approve.mutate()}
@@ -363,6 +438,16 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
                   >
                     {makeIssue.isPending && <Loader2 size={13} className="animate-spin" />}
                     Create GitLab Issue
+                  </button>
+                )}
+                {isBlock && !card.work_item_url && (
+                  <button
+                    onClick={() => makeWorkItem.mutate()}
+                    disabled={makeWorkItem.isPending}
+                    className="flex-1 rounded-lg bg-purple-900/50 hover:bg-purple-900/70 border border-purple-800/50 disabled:opacity-50 text-purple-300 font-semibold py-2 text-sm transition-colors flex items-center justify-center gap-2"
+                  >
+                    {makeWorkItem.isPending && <Loader2 size={13} className="animate-spin" />}
+                    Create Work Item
                   </button>
                 )}
               </div>

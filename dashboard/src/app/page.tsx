@@ -2,6 +2,7 @@ import { VerdictFeed } from "@/components/VerdictFeed";
 import { ChatPanel } from "@/components/ChatPanel";
 import { StatsBar } from "@/components/StatsBar";
 import { ScenarioEditor } from "@/components/ScenarioEditor";
+import { TrendPanel } from "@/components/TrendPanel";
 
 export default function Home() {
   return (
@@ -20,6 +21,7 @@ export default function Home() {
 
       <div className="max-w-7xl mx-auto px-6 py-6">
         <StatsBar />
+        <TrendPanel />
 
         <div className="grid grid-cols-5 gap-5">
           {/* Verdict feed — wider */}
