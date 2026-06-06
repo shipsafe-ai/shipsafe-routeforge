@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, FileCode } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-336382452417.us-central1.run.app";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-o34wppiwiq-uc.a.run.app";
 
 interface DiffFile {
   old_path: string;

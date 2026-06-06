@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { PipelineLog } from "./PipelineLog";
 import { DiffViewer } from "./DiffViewer";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-336382452417.us-central1.run.app";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-o34wppiwiq-uc.a.run.app";
 
 type VerdictEnum = "PASS" | "BLOCK" | "PENDING";
 
