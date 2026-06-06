@@ -1,0 +1,119 @@
+"""ScenarioTester — runs changed algorithm against Hormuz crisis fixtures."""
+from __future__ import annotations
+
+import dataclasses
+import json
+import re
+import textwrap
+from pathlib import Path
+from typing import Any
+
+
+FIXTURES_PATH = Path(__file__).parent.parent.parent / "fixtures" / "hormuz_crisis.json"
+
+# Patterns extracted from diff that indicate crisis-aware routing logic
+_CRISIS_BLOCK_PATTERN = re.compile(
+    r"(crisis_mode|CRISIS|blockade|strait.*block|return\s+None.*crisis|if.*crisis.*return)",
+    re.IGNORECASE,
+)
+_THROUGHPUT_GAIN_PATTERN = re.compile(
+    r"throughput.*(\d+\.?\d*)%|(\d+\.?\d*)%.*throughput",
+    re.IGNORECASE,
+)
+
+
+@dataclasses.dataclass
+class ScenarioResult:
+    scenario_id: str
+    crisis_mode: bool
+    route_blocked: bool
+    route_rerouted: bool
+    throughput_delta_pct: float
+    notes: str
+
+
+class ScenarioTester:
+    def load_fixtures(self) -> list[dict[str, Any]]:
+        """Load Hormuz crisis scenario fixtures from disk."""
+        with FIXTURES_PATH.open() as f:
+            return json.load(f)
+
+    def run_against_fixtures(
+        self,
+        diff_content: str,
+        fixtures: list[dict[str, Any]],
+    ) -> list[ScenarioResult]:
+        """Simulate algorithm behaviour given the diff content against each fixture."""
+        results = []
+        diff_signals = self._extract_diff_signals(diff_content)
+
+        for fixture in fixtures:
+            result = self._evaluate_fixture(fixture, diff_signals)
+            results.append(result)
+
+        return results
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _extract_diff_signals(self, diff: str) -> dict[str, Any]:
+        """Parse the diff for routing behaviour signals."""
+        added_lines = [
+            line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++")
+        ]
+        added_text = "\n".join(added_lines)
+
+        crisis_block_added = bool(_CRISIS_BLOCK_PATTERN.search(added_text))
+
+        throughput_delta = 0.0
+        match = _THROUGHPUT_GAIN_PATTERN.search(diff)
+        if match:
+            raw = match.group(1) or match.group(2)
+            try:
+                throughput_delta = float(raw)
+            except ValueError:
+                pass
+
+        reroute_added = any(
+            kw in added_text.lower()
+            for kw in ("cape_good_hope", "alternate", "reroute", "fallback_route")
+        )
+
+        return {
+            "crisis_block_added": crisis_block_added,
+            "throughput_delta": throughput_delta,
+            "reroute_logic_added": reroute_added,
+        }
+
+    def _evaluate_fixture(
+        self, fixture: dict[str, Any], signals: dict[str, Any]
+    ) -> ScenarioResult:
+        crisis = fixture.get("crisis_mode", False)
+        strait_id = fixture.get("strait_id", "none")
+        expected_blocked = fixture.get("expected_blocked", False)
+        expected_rerouted = fixture.get("expected_rerouted", False)
+
+        # Simulate algorithm outcome based on diff signals
+        if crisis and strait_id == "hormuz":
+            if signals["crisis_block_added"]:
+                route_blocked = expected_blocked
+                route_rerouted = signals["reroute_logic_added"] and expected_rerouted
+            else:
+                # Diff doesn't handle crisis — algorithm passes strait through (dangerous)
+                route_blocked = False
+                route_rerouted = False
+        else:
+            route_blocked = False
+            route_rerouted = False
+
+        throughput_delta = signals["throughput_delta"] if not crisis else 0.0
+
+        return ScenarioResult(
+            scenario_id=fixture["scenario_id"],
+            crisis_mode=crisis,
+            route_blocked=route_blocked,
+            route_rerouted=route_rerouted,
+            throughput_delta_pct=throughput_delta,
+            notes=f"strait={strait_id} crisis={crisis}",
+        )

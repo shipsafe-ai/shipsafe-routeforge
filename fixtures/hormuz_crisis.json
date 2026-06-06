@@ -1,0 +1,78 @@
+[
+  {
+    "scenario_id": "hormuz_crisis_01",
+    "description": "LNG tanker Strait of Hormuz — active crisis blockade",
+    "cargo": {
+      "type": "LNG",
+      "vessel": "Pacific Carrier",
+      "origin": "Abu Dhabi",
+      "destination": "Yokohama"
+    },
+    "strait_id": "hormuz",
+    "crisis_mode": true,
+    "expected_route": null,
+    "expected_blocked": true,
+    "baseline_throughput_teu": 0
+  },
+  {
+    "scenario_id": "hormuz_crisis_02",
+    "description": "Crude oil tanker Strait of Hormuz — active crisis blockade",
+    "cargo": {
+      "type": "crude_oil",
+      "vessel": "Gulf Eagle",
+      "origin": "Kuwait City",
+      "destination": "Rotterdam"
+    },
+    "strait_id": "hormuz",
+    "crisis_mode": true,
+    "expected_route": null,
+    "expected_blocked": true,
+    "baseline_throughput_teu": 0
+  },
+  {
+    "scenario_id": "hormuz_normal_01",
+    "description": "Container ship Strait of Hormuz — normal conditions",
+    "cargo": {
+      "type": "container",
+      "vessel": "Star of Asia",
+      "origin": "Dubai",
+      "destination": "Singapore"
+    },
+    "strait_id": "hormuz",
+    "crisis_mode": false,
+    "expected_route": "hormuz_fast_lane",
+    "expected_blocked": false,
+    "baseline_throughput_teu": 18500
+  },
+  {
+    "scenario_id": "pacific_normal_01",
+    "description": "Container ship Pacific — no strait dependency",
+    "cargo": {
+      "type": "container",
+      "vessel": "Pacific Star",
+      "origin": "Los Angeles",
+      "destination": "Tokyo"
+    },
+    "strait_id": "none",
+    "crisis_mode": false,
+    "expected_route": "trans_pacific_express",
+    "expected_blocked": false,
+    "baseline_throughput_teu": 22000
+  },
+  {
+    "scenario_id": "hormuz_crisis_reroute_01",
+    "description": "Algorithm must suggest Cape of Good Hope reroute during Hormuz crisis",
+    "cargo": {
+      "type": "LNG",
+      "vessel": "Arabian Wind",
+      "origin": "Qatar",
+      "destination": "Spain"
+    },
+    "strait_id": "hormuz",
+    "crisis_mode": true,
+    "expected_route": "cape_good_hope_alternate",
+    "expected_blocked": false,
+    "expected_rerouted": true,
+    "baseline_throughput_teu": 0
+  }
+]
