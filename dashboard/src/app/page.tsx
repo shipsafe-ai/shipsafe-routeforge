@@ -1,6 +1,7 @@
 import { VerdictFeed } from "@/components/VerdictFeed";
 import { ChatPanel } from "@/components/ChatPanel";
 import { StatsBar } from "@/components/StatsBar";
+import { ScenarioEditor } from "@/components/ScenarioEditor";
 
 export default function Home() {
   return (
@@ -26,10 +27,13 @@ export default function Home() {
             <VerdictFeed />
           </div>
 
-          {/* Chat panel — sticky */}
-          <div className="col-span-2">
-            <div className="sticky top-6 h-[calc(100vh-160px)]">
-              <ChatPanel />
+          {/* Right column: chat + scenario editor */}
+          <div className="col-span-2 space-y-4">
+            <div className="sticky top-6 space-y-4">
+              <div className="h-[420px]">
+                <ChatPanel />
+              </div>
+              <ScenarioEditor />
             </div>
           </div>
         </div>
