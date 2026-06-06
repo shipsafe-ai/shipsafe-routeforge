@@ -11,6 +11,7 @@ from agent.config import get_secret, gcp_project, vertex_location
 from agent.specialists.commit_watcher import CommitWatcher, MergeRequestEvent
 from agent.specialists.scenario_tester import ScenarioTester
 from agent.specialists.code_context_analyzer import CodeContextAnalyzer
+from agent.specialists.pipeline_observer import PipelineObserver, PipelineStatus
 from agent.specialists.risk_gate import RiskGate, Verdict, VerdictEnum
 from agent.specialists.changelog_writer import ChangelogWriter
 from agent.critic import Critic, CriticReport
@@ -25,13 +26,16 @@ class PipelineResult:
     critic_report: CriticReport
     comment_draft: str
     injection_blocked: bool
+    pipeline_status: PipelineStatus | None = None
+    diffs: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    changed_functions: list[str] = dataclasses.field(default_factory=list)
 
 
 class RouteForgeOrchestrator:
-    """Sequential pipeline: watch → test → analyze → gate → critic → draft comment.
+    """Sequential pipeline: watch → observe CI → test → analyze → gate → critic → draft.
 
-    Human approval is MANDATORY before calling create_workitem_note.
-    This class never posts to GitLab directly — it returns a draft for operator review.
+    Human approval is MANDATORY before posting to GitLab.
+    This class never posts directly — it returns a draft for operator review.
     """
 
     def __init__(self) -> None:
@@ -40,6 +44,7 @@ class RouteForgeOrchestrator:
         location = vertex_location()
 
         self._watcher = CommitWatcher(gitlab_pat=pat, gitlab_project_id="82762386")
+        self._observer = PipelineObserver(gitlab_pat=pat, gitlab_project_id="82762386")
         self._tester = ScenarioTester()
         self._analyzer = CodeContextAnalyzer(gitlab_pat=pat)
         self._gate = RiskGate(project_id=project_id, location=location)
@@ -55,7 +60,7 @@ class RouteForgeOrchestrator:
 
         log.info("pipeline.start", mr_iid=event.mr_iid, title=event.title)
 
-        # 2. Fetch diffs via REST API
+        # 2. Fetch diffs
         diffs = await self._watcher.fetch_mr_diffs(mr_iid=event.mr_iid)
         diff_text = "\n".join(d.get("diff", "") for d in diffs)
 
@@ -68,18 +73,27 @@ class RouteForgeOrchestrator:
                 mr_iid=event.mr_iid,
             )
 
-        # 4. Scenario tests
+        # 4. CI pipeline status (non-blocking — runs alongside scenario tests)
+        pipeline_status = await self._observer.fetch_pipeline_status(mr_iid=event.mr_iid)
+        log.info(
+            "pipeline.ci_status",
+            mr_iid=event.mr_iid,
+            ci=pipeline_status.overall,
+            failing_jobs=pipeline_status.failing_jobs,
+        )
+
+        # 5. Scenario tests
         fixtures = self._tester.load_fixtures()
         scenario_results = self._tester.run_against_fixtures(
             diff_content=diff_text, fixtures=fixtures
         )
         scenario_dicts = [dataclasses.asdict(r) for r in scenario_results]
 
-        # 5. Code context via MCP semantic_code_search
+        # 6. Code context via MCP semantic_code_search
         code_context = await self._analyzer.analyze(diffs=diffs, project_id=str(event.project_id))
         context_dict = dataclasses.asdict(code_context)
 
-        # 6. Risk gate — Gemini structured verdict
+        # 7. Risk gate — Gemini structured verdict
         verdict = await self._gate.evaluate(
             scenario_results=scenario_dicts,
             code_context=context_dict,
@@ -93,13 +107,13 @@ class RouteForgeOrchestrator:
             "affected_scenarios": verdict.affected_scenarios,
         }
 
-        # 7. Critic challenges verdict
+        # 8. Critic challenges verdict
         critic_report = await self._critic.challenge_verdict(
             verdict=verdict_dict,
             scenario_results=scenario_dicts,
         )
 
-        # 8. Draft comment (never posted without human approval)
+        # 9. Draft comment (never posted without human approval)
         comment = await self._writer.draft_comment(
             verdict=verdict_dict,
             mr_iid=event.mr_iid,
@@ -110,6 +124,7 @@ class RouteForgeOrchestrator:
             mr_iid=event.mr_iid,
             verdict=verdict.verdict,
             confidence=verdict.confidence,
+            ci=pipeline_status.overall,
             injection_blocked=injection_report.injection_detected,
         )
 
@@ -119,4 +134,7 @@ class RouteForgeOrchestrator:
             critic_report=critic_report,
             comment_draft=comment,
             injection_blocked=injection_report.injection_detected,
+            pipeline_status=pipeline_status,
+            diffs=diffs,
+            changed_functions=code_context.changed_functions,
         )
