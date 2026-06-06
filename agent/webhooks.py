@@ -289,10 +289,21 @@ async def create_work_item_for_verdict(mr_iid: int) -> JSONResponse:
 @app.post("/chat")
 async def chat_endpoint(body: ChatRequest) -> JSONResponse:
     handler = ChatHandler()
-    context = _verdicts.get(body.mr_iid) if body.mr_iid is not None else None
-    # Strip diffs from context passed to Gemini — not needed for chat
-    if context:
-        context = {k: v for k, v in context.items() if k != "diffs"}
+    if body.mr_iid is not None:
+        context = _verdicts.get(body.mr_iid)
+        if context:
+            context = {k: v for k, v in context.items() if k != "diffs"}
+    else:
+        # "all verdicts" context — pass summary list so chat can answer cross-MR questions
+        if _verdicts:
+            context = {
+                "all_verdicts": [
+                    {k: v for k, v in entry.items() if k not in ("diffs", "comment_draft")}
+                    for entry in _verdicts.values()
+                ]
+            }
+        else:
+            context = None
     response = await handler.handle_free_text(body.message, context)
     return JSONResponse(content={"response": response})
 
