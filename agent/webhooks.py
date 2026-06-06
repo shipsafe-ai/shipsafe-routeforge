@@ -183,6 +183,22 @@ async def chat_endpoint(body: ChatRequest) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
+# Diff endpoint (diffs stored internally, not in list API response)
+# ---------------------------------------------------------------------------
+
+@app.get("/verdicts/{mr_iid}/diffs")
+async def get_verdict_diffs(mr_iid: int) -> JSONResponse:
+    if mr_iid not in _verdicts:
+        raise HTTPException(status_code=404, detail="Verdict not found")
+    diffs = _verdicts[mr_iid].get("diffs", [])
+    # Return only path + diff text — omit binary blobs
+    return JSONResponse(content=[
+        {"old_path": d.get("old_path", ""), "new_path": d.get("new_path", ""), "diff": d.get("diff", "")}
+        for d in diffs
+    ])
+
+
+# ---------------------------------------------------------------------------
 # Live pipeline log stream (SSE)
 # ---------------------------------------------------------------------------
 

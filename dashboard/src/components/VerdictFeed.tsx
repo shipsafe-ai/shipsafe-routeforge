@@ -9,6 +9,7 @@ import { clsx } from "clsx";
 import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PipelineLog } from "./PipelineLog";
+import { DiffViewer } from "./DiffViewer";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-336382452417.us-central1.run.app";
 
@@ -143,6 +144,7 @@ function PassStats({ card }: { card: Verdict }) {
 
 function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"verdict" | "diff">("verdict");
   const qc = useQueryClient();
   const isBlock = card.verdict === "BLOCK";
 
@@ -220,7 +222,30 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
             onClick={(e) => e.stopPropagation()}
             className="overflow-hidden"
           >
-            <div className="border-t border-gray-800 px-4 py-4 space-y-4">
+            <div className="border-t border-gray-800">
+              {/* Tab bar */}
+              <div className="flex border-b border-gray-800">
+                {(["verdict", "diff"] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setTab(t)}
+                    className={`px-4 py-2 text-xs font-medium transition-colors ${
+                      tab === t
+                        ? "text-gray-100 border-b-2 border-brand -mb-px"
+                        : "text-gray-500 hover:text-gray-300"
+                    }`}
+                  >
+                    {t === "verdict" ? "Verdict" : "Diff"}
+                  </button>
+                ))}
+              </div>
+
+              {tab === "diff" ? (
+                <div className="px-4 py-4">
+                  <DiffViewer mrIid={card.mr_iid} failingFunctions={card.changed_functions ?? []} />
+                </div>
+              ) : (
+              <div className="px-4 py-4 space-y-4">
               {/* Reasoning */}
               <div>
                 <p className="text-gray-500 text-xs uppercase tracking-wide mb-1">Reasoning</p>
@@ -341,6 +366,8 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
                   </button>
                 )}
               </div>
+              </div>
+              )}
             </div>
           </motion.div>
         )}
