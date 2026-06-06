@@ -395,6 +395,10 @@ def _store_verdict(result: PipelineResult, payload: dict[str, Any]) -> None:
         # Stored for inline comments during approve — stripped from list API
         "diffs": result.diffs,
         "changed_functions": result.changed_functions,
+        # Scenario stats for PASS/BLOCK card display
+        "throughput_delta_pct": result.throughput_delta_pct,
+        "scenarios_passed": result.scenarios_passed,
+        "scenarios_total": result.scenarios_total,
     }
 
     _verdicts[result.mr_iid] = entry

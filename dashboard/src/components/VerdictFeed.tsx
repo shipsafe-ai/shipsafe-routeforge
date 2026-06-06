@@ -1,9 +1,13 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ShieldCheck, ShieldX, Clock, Loader2, ExternalLink, GitMerge, AlertCircle } from "lucide-react";
+import {
+  ShieldCheck, ShieldX, Clock, Loader2, ExternalLink,
+  GitMerge, AlertCircle, TrendingUp, CheckCircle2,
+} from "lucide-react";
 import { clsx } from "clsx";
-import { useState } from "react";
+import { useState, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-336382452417.us-central1.run.app";
 
@@ -31,6 +35,9 @@ interface Verdict {
   pipeline_status?: PipelineStatus;
   issue_url?: string;
   changed_functions?: string[];
+  throughput_delta_pct?: number;
+  scenarios_passed?: number;
+  scenarios_total?: number;
 }
 
 async function fetchVerdicts(): Promise<Verdict[]> {
@@ -53,7 +60,7 @@ async function createIssue(mr_iid: number): Promise<{ issue_url: string }> {
 function VerdictBadge({ verdict }: { verdict: VerdictEnum }) {
   if (verdict === "BLOCK")
     return (
-      <span className="flex items-center gap-1 text-red-400 font-bold text-sm">
+      <span className="flex items-center gap-1 text-red-400 font-bold text-sm animate-pulse">
         <ShieldX size={15} /> BLOCK
       </span>
     );
@@ -72,15 +79,13 @@ function VerdictBadge({ verdict }: { verdict: VerdictEnum }) {
 
 function CIBadge({ ps }: { ps?: PipelineStatus }) {
   if (!ps || ps.overall === "none") return null;
-
   const map: Record<string, { color: string; dot: string; label: string }> = {
     passing: { color: "text-green-400", dot: "bg-green-400", label: "CI passing" },
     failing: { color: "text-red-400", dot: "bg-red-400", label: "CI failing" },
-    running: { color: "text-yellow-400", dot: "bg-yellow-400", label: "CI running" },
+    running: { color: "text-yellow-400", dot: "bg-yellow-400 animate-pulse", label: "CI running" },
     pending: { color: "text-gray-400", dot: "bg-gray-500", label: "CI pending" },
   };
   const style = map[ps.overall] ?? { color: "text-gray-500", dot: "bg-gray-600", label: `CI ${ps.overall}` };
-
   return (
     <a
       href={ps.pipeline_url || undefined}
@@ -101,16 +106,44 @@ function ConfidenceMeter({ value }: { value: number }) {
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-1 bg-gray-700 rounded-full overflow-hidden">
-        <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
+        <motion.div
+          className={`h-full ${color} rounded-full`}
+          initial={{ width: 0 }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+        />
       </div>
       <span className="text-xs text-gray-400 tabular-nums w-8">{pct}%</span>
     </div>
   );
 }
 
-function VerdictCard({ card }: { card: Verdict }) {
+function PassStats({ card }: { card: Verdict }) {
+  const delta = card.throughput_delta_pct ?? 0;
+  const passed = card.scenarios_passed ?? 0;
+  const total = card.scenarios_total ?? 0;
+  return (
+    <div className="flex items-center gap-3 mt-1.5">
+      {delta > 0 && (
+        <span className="flex items-center gap-1 text-xs text-green-400 font-mono">
+          <TrendingUp size={11} />
+          +{delta.toFixed(1)}% throughput
+        </span>
+      )}
+      {total > 0 && (
+        <span className="flex items-center gap-1 text-xs text-green-500 font-mono">
+          <CheckCircle2 size={11} />
+          {passed}/{total} scenarios
+        </span>
+      )}
+    </div>
+  );
+}
+
+function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
   const [open, setOpen] = useState(false);
   const qc = useQueryClient();
+  const isBlock = card.verdict === "BLOCK";
 
   const approve = useMutation({
     mutationFn: () => approveVerdict(card.mr_iid),
@@ -122,17 +155,20 @@ function VerdictCard({ card }: { card: Verdict }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["verdicts"] }),
   });
 
-  const isBlock = card.verdict === "BLOCK";
   const ts = new Date(card.timestamp).toLocaleString();
 
   return (
-    <div
+    <motion.div
+      layout
+      initial={isNew ? { opacity: 0, y: -16, scale: 0.98 } : false}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.35, ease: "easeOut" }}
       onClick={() => setOpen((v) => !v)}
       className={clsx(
-        "rounded-xl border cursor-pointer transition-all",
+        "rounded-xl border cursor-pointer transition-colors duration-150",
         isBlock
-          ? "border-red-900 bg-red-950/20 hover:bg-red-950/35"
-          : "border-green-900 bg-green-950/15 hover:bg-green-950/25"
+          ? "border-red-900/70 bg-red-950/20 hover:bg-red-950/35 shadow-sm shadow-red-950/30"
+          : "border-green-900/50 bg-green-950/10 hover:bg-green-950/20 shadow-sm shadow-green-950/20"
       )}
     >
       {/* Card header */}
@@ -156,6 +192,7 @@ function VerdictCard({ card }: { card: Verdict }) {
           ) : (
             <p className="text-gray-100 font-medium text-sm truncate">{card.mr_title}</p>
           )}
+          {!isBlock && <PassStats card={card} />}
           <p className="text-gray-600 text-xs mt-0.5">{ts}</p>
         </div>
         <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
@@ -172,123 +209,159 @@ function VerdictCard({ card }: { card: Verdict }) {
       </div>
 
       {/* Expanded detail */}
-      {open && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="border-t border-gray-800 px-4 py-4 space-y-4"
-        >
-          {/* Reasoning */}
-          <div>
-            <p className="text-gray-500 text-xs uppercase tracking-wide mb-1">Reasoning</p>
-            <p className="text-gray-300 text-sm leading-relaxed">{card.reasoning}</p>
-          </div>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
+            onClick={(e) => e.stopPropagation()}
+            className="overflow-hidden"
+          >
+            <div className="border-t border-gray-800 px-4 py-4 space-y-4">
+              {/* Reasoning */}
+              <div>
+                <p className="text-gray-500 text-xs uppercase tracking-wide mb-1">Reasoning</p>
+                <p className="text-gray-300 text-sm leading-relaxed">{card.reasoning}</p>
+              </div>
 
-          {/* Affected scenarios */}
-          {card.affected_scenarios.length > 0 && (
-            <div>
-              <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5">Affected scenarios</p>
-              <div className="flex flex-wrap gap-1.5">
-                {card.affected_scenarios.map((s) => (
-                  <span key={s} className="font-mono text-xs bg-red-950/40 border border-red-900/50 text-red-300 px-2 py-0.5 rounded">
-                    {s}
-                  </span>
-                ))}
+              {/* Affected scenarios (BLOCK) */}
+              {isBlock && card.affected_scenarios.length > 0 && (
+                <div>
+                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5">Affected scenarios</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {card.affected_scenarios.map((s) => (
+                      <span key={s} className="font-mono text-xs bg-red-950/40 border border-red-900/50 text-red-300 px-2 py-0.5 rounded">
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* PASS: scenarios passed list */}
+              {!isBlock && (card.scenarios_total ?? 0) > 0 && (
+                <div>
+                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5">Scenarios</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-green-400 text-xs font-mono">
+                      ✓ {card.scenarios_passed}/{card.scenarios_total} passed
+                    </span>
+                    {(card.throughput_delta_pct ?? 0) > 0 && (
+                      <span className="text-green-400 text-xs font-mono">
+                        · +{card.throughput_delta_pct?.toFixed(1)}% throughput improvement
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Changed functions */}
+              {card.changed_functions && card.changed_functions.length > 0 && (
+                <div>
+                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5">Changed functions</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {card.changed_functions.map((fn) => (
+                      <span key={fn} className="font-mono text-xs bg-gray-800 border border-gray-700 text-gray-300 px-2 py-0.5 rounded">
+                        {fn}()
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* CI failing jobs */}
+              {(card.pipeline_status?.failing_jobs?.length ?? 0) > 0 && (
+                <div>
+                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5 flex items-center gap-1">
+                    <AlertCircle size={11} className="text-red-400" /> Failing CI jobs
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {card.pipeline_status?.failing_jobs?.map((j) => (
+                      <span key={j} className="font-mono text-xs bg-red-950/30 border border-red-900/40 text-red-300 px-2 py-0.5 rounded">
+                        {j}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Injection warning */}
+              {card.injection_blocked && (
+                <p className="text-yellow-400 text-xs flex items-center gap-1">
+                  ⚠ Prompt injection detected in diff — verdict independently reviewed
+                </p>
+              )}
+
+              {/* Comment draft */}
+              <div>
+                <p className="text-gray-500 text-xs uppercase tracking-wide mb-2">Comment draft</p>
+                <div className="bg-gray-950 rounded-lg p-3 border border-gray-800">
+                  <pre className="text-gray-300 text-xs whitespace-pre-wrap leading-relaxed">{card.comment_draft}</pre>
+                </div>
+              </div>
+
+              {/* Issue link */}
+              {card.issue_url && (
+                <a
+                  href={card.issue_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-blue-400 hover:underline"
+                >
+                  <ExternalLink size={11} /> View tracking issue
+                </a>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-2 pt-1">
+                {!card.posted && (
+                  <button
+                    onClick={() => approve.mutate()}
+                    disabled={approve.isPending}
+                    className="flex-1 rounded-lg bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white font-semibold py-2 text-sm transition-colors flex items-center justify-center gap-2"
+                  >
+                    {approve.isPending && <Loader2 size={13} className="animate-spin" />}
+                    Approve &amp; Post to GitLab
+                  </button>
+                )}
+                {isBlock && !card.issue_url && (
+                  <button
+                    onClick={() => makeIssue.mutate()}
+                    disabled={makeIssue.isPending}
+                    className="flex-1 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-200 font-semibold py-2 text-sm transition-colors flex items-center justify-center gap-2"
+                  >
+                    {makeIssue.isPending && <Loader2 size={13} className="animate-spin" />}
+                    Create GitLab Issue
+                  </button>
+                )}
               </div>
             </div>
-          )}
-
-          {/* Changed functions */}
-          {card.changed_functions && card.changed_functions.length > 0 && (
-            <div>
-              <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5">Changed functions</p>
-              <div className="flex flex-wrap gap-1.5">
-                {card.changed_functions.map((fn) => (
-                  <span key={fn} className="font-mono text-xs bg-gray-800 border border-gray-700 text-gray-300 px-2 py-0.5 rounded">
-                    {fn}()
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* CI failing jobs */}
-          {(card.pipeline_status?.failing_jobs?.length ?? 0) > 0 && (
-            <div>
-              <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5 flex items-center gap-1">
-                <AlertCircle size={11} className="text-red-400" /> Failing CI jobs
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {card.pipeline_status?.failing_jobs?.map((j) => (
-                  <span key={j} className="font-mono text-xs bg-red-950/30 border border-red-900/40 text-red-300 px-2 py-0.5 rounded">
-                    {j}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Injection warning */}
-          {card.injection_blocked && (
-            <p className="text-yellow-400 text-xs flex items-center gap-1">
-              ⚠ Prompt injection detected in diff — verdict independently reviewed
-            </p>
-          )}
-
-          {/* Comment draft */}
-          <div>
-            <p className="text-gray-500 text-xs uppercase tracking-wide mb-2">Comment draft</p>
-            <div className="bg-gray-950 rounded-lg p-3 border border-gray-800">
-              <pre className="text-gray-300 text-xs whitespace-pre-wrap leading-relaxed">{card.comment_draft}</pre>
-            </div>
-          </div>
-
-          {/* Issue link */}
-          {card.issue_url && (
-            <a
-              href={card.issue_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-xs text-blue-400 hover:underline"
-            >
-              <ExternalLink size={11} /> View tracking issue
-            </a>
-          )}
-
-          {/* Actions */}
-          <div className="flex gap-2 pt-1">
-            {!card.posted && (
-              <button
-                onClick={() => approve.mutate()}
-                disabled={approve.isPending}
-                className="flex-1 rounded-lg bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white font-semibold py-2 text-sm transition-colors flex items-center justify-center gap-2"
-              >
-                {approve.isPending && <Loader2 size={13} className="animate-spin" />}
-                Approve &amp; Post to GitLab
-              </button>
-            )}
-            {isBlock && !card.issue_url && (
-              <button
-                onClick={() => makeIssue.mutate()}
-                disabled={makeIssue.isPending}
-                className="flex-1 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-200 font-semibold py-2 text-sm transition-colors flex items-center justify-center gap-2"
-              >
-                {makeIssue.isPending && <Loader2 size={13} className="animate-spin" />}
-                Create GitLab Issue
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }
 
 export function VerdictFeed() {
+  const prevIidsRef = useRef<Set<number>>(new Set());
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["verdicts"],
     queryFn: fetchVerdicts,
     refetchInterval: 10_000,
   });
+
+  // Track which MR IIDs are new since last render
+  const newIids = new Set<number>();
+  if (data) {
+    data.forEach((v) => {
+      if (!prevIidsRef.current.has(v.mr_iid)) newIids.add(v.mr_iid);
+    });
+    prevIidsRef.current = new Set(data.map((v) => v.mr_iid));
+  }
 
   if (isLoading)
     return (
@@ -316,9 +389,11 @@ export function VerdictFeed() {
         </h2>
         <span className="text-xs text-gray-600">auto-refresh 10s</span>
       </div>
-      {data.map((card) => (
-        <VerdictCard key={card.mr_iid} card={card} />
-      ))}
+      <AnimatePresence mode="popLayout">
+        {data.map((card) => (
+          <VerdictCard key={card.mr_iid} card={card} isNew={newIids.has(card.mr_iid)} />
+        ))}
+      </AnimatePresence>
     </div>
   );
 }

@@ -29,6 +29,9 @@ class PipelineResult:
     pipeline_status: PipelineStatus | None = None
     diffs: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     changed_functions: list[str] = dataclasses.field(default_factory=list)
+    throughput_delta_pct: float = 0.0
+    scenarios_passed: int = 0
+    scenarios_total: int = 0
 
 
 class RouteForgeOrchestrator:
@@ -128,6 +131,16 @@ class RouteForgeOrchestrator:
             injection_blocked=injection_report.injection_detected,
         )
 
+        # Throughput stats from normal scenarios
+        normal_results = [r for r in scenario_results if not r.get("crisis_mode")]
+        max_delta = max((r.get("throughput_delta_pct", 0.0) for r in normal_results), default=0.0)
+        # Count pass/fail: crisis scenario passes if handled correctly per RiskGate logic
+        scenarios_passed = len([r for r in scenario_results if not (
+            (r.get("crisis_mode") and not r.get("route_blocked") and not r.get("expected_rerouted", False))
+            or (r.get("crisis_mode") and r.get("expected_rerouted") and not r.get("route_rerouted"))
+            or (not r.get("crisis_mode") and r.get("route_blocked"))
+        )])
+
         return PipelineResult(
             mr_iid=event.mr_iid,
             verdict=verdict,
@@ -137,4 +150,7 @@ class RouteForgeOrchestrator:
             pipeline_status=pipeline_status,
             diffs=diffs,
             changed_functions=code_context.changed_functions,
+            throughput_delta_pct=max_delta,
+            scenarios_passed=scenarios_passed,
+            scenarios_total=len(scenario_results),
         )
