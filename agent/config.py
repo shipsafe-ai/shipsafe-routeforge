@@ -5,7 +5,7 @@ from google.cloud import secretmanager
 
 
 _PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "shipsafe-routeforge")
-_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-001")
 _VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION", "us-central1")
 
 GITLAB_PROJECT_ID = os.environ.get("GITLAB_PROJECT_ID", "82762386")

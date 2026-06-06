@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import re
 from typing import Any
@@ -16,6 +17,14 @@ _FUNC_PATTERN = re.compile(
     r"(?:^|\+)\s*(?:def|func|function|async def)\s+(\w+)",
     re.MULTILINE,
 )
+
+def _parse_sse(body: str) -> dict[str, Any]:
+    """Extract first JSON object from an SSE response body."""
+    for line in body.splitlines():
+        if line.startswith("data:"):
+            return json.loads(line[5:].strip())
+    return json.loads(body)
+
 
 _MCP_URL = os.environ.get(
     "ZEREIGHT_MCP_URL",
@@ -111,7 +120,7 @@ class CodeContextAnalyzer:
             )
             call_resp.raise_for_status()
 
-        data = call_resp.json()
+        data = _parse_sse(call_resp.text)
         content = data.get("result", {}).get("content", [])
         results = []
         for item in content:

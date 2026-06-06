@@ -60,9 +60,7 @@ class TestMCPCodeSearch:
         mock_resp.raise_for_status = MagicMock()
         mock_resp.headers = MagicMock()
         mock_resp.headers.get = MagicMock(return_value="test-session-id")
-        mock_resp.json = lambda: {
-            "result": {"content": [{"type": "text", "text": "def foo():"}]}
-        }
+        mock_resp.text = 'event: message\ndata: {"result":{"content":[{"type":"text","text":"def foo():"}]}}'
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = mock_resp
             await analyzer._search_project_code("routing strait", "82762386")
