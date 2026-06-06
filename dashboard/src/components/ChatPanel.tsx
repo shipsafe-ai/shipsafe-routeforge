@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Send, Loader2, Bot, MessageSquare } from "lucide-react";
+import { Send, Loader2 } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-o34wppiwiq-uc.a.run.app";
 
@@ -28,7 +28,7 @@ async function sendChat(payload: { message: string; mr_iid?: number }): Promise<
 
 const INITIAL_MESSAGE: Message = {
   role: "assistant",
-  text: "Ask me anything about RouteForge verdicts.\n\nTry: *\"explain the last BLOCK\"* or *\"what scenarios failed?\"*",
+  text: "Ask me anything about RouteForge verdicts.\n\nTry: \"explain the last BLOCK\" or \"what scenarios failed?\"",
 };
 
 const SUGGESTIONS = [
@@ -43,6 +43,7 @@ export function ChatPanel() {
   const [input, setInput] = useState("");
   const [selectedMR, setSelectedMR] = useState<number | undefined>(undefined);
   const [showSuggestions, setShowSuggestions] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data: verdicts = [] } = useQuery<VerdictSummary[]>({
     queryKey: ["verdicts"],
@@ -53,6 +54,12 @@ export function ChatPanel() {
     },
     staleTime: 10_000,
   });
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
 
   const chat = useMutation({
     mutationFn: (message: string) =>
@@ -78,31 +85,28 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 rounded-lg border border-gray-800 overflow-hidden">
+    <div className="flex flex-col h-full bg-[#111215] rounded-lg border border-[#1e1e26] overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-800 bg-gray-900/80">
-        <div className="p-1 bg-brand/20 rounded">
-          <Bot size={14} className="text-brand" />
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-[#1e1e26]">
+        <span className="text-[11px] text-gray-500 uppercase tracking-wide font-mono">ask routeforge</span>
+        <div className="ml-auto flex items-center gap-1.5 text-[10px] text-gray-600 font-mono">
+          <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+          gemini
         </div>
-        <span className="text-sm font-semibold text-gray-200">Ask RouteForge</span>
-        <span className="ml-auto flex items-center gap-1 text-xs text-green-400">
-          <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
-          Gemini
-        </span>
       </div>
 
       {/* MR selector */}
       {verdicts.length > 0 && (
-        <div className="px-3 py-2 border-b border-gray-800/60 bg-gray-900/60">
+        <div className="px-3 py-2 border-b border-[#1e1e26]">
           <select
             value={selectedMR ?? ""}
             onChange={(e) => setSelectedMR(e.target.value ? Number(e.target.value) : undefined)}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-brand/50"
+            className="w-full bg-[#16161b] border border-[#1e1e26] rounded px-2 py-1 text-[11px] font-mono text-gray-400 focus:outline-none focus:border-brand/40 transition-colors"
           >
-            <option value="">Context: all verdicts</option>
+            <option value="">context: all verdicts</option>
             {verdicts.map((v) => (
               <option key={v.mr_iid} value={v.mr_iid}>
-                MR !{v.mr_iid}: {v.mr_title}
+                !{v.mr_iid} — {v.mr_title}
               </option>
             ))}
           </select>
@@ -110,19 +114,14 @@ export function ChatPanel() {
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 min-h-0">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2.5 min-h-0">
         {messages.map((m, i) => (
-          <div key={i} className={`flex gap-2 ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-            {m.role === "assistant" && (
-              <div className="w-6 h-6 rounded-full bg-brand/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <MessageSquare size={10} className="text-brand" />
-              </div>
-            )}
+          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             <div
-              className={`max-w-[88%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap ${
+              className={`max-w-[90%] px-3 py-2 rounded text-[12px] leading-relaxed whitespace-pre-wrap ${
                 m.role === "user"
-                  ? "bg-brand/20 text-gray-100 border border-brand/30 rounded-tr-sm"
-                  : "bg-gray-800 text-gray-300 rounded-tl-sm"
+                  ? "bg-[#16161b] border border-brand/30 text-gray-200 border-l-2 border-l-brand/60"
+                  : "text-gray-300"
               }`}
             >
               {m.text}
@@ -131,15 +130,12 @@ export function ChatPanel() {
         ))}
 
         {chat.isPending && (
-          <div className="flex gap-2 justify-start">
-            <div className="w-6 h-6 rounded-full bg-brand/20 flex items-center justify-center flex-shrink-0">
-              <MessageSquare size={10} className="text-brand" />
-            </div>
-            <div className="bg-gray-800 rounded-xl rounded-tl-sm px-4 py-2.5">
+          <div className="flex justify-start">
+            <div className="px-3 py-2 text-gray-600">
               <div className="flex gap-1 items-center">
-                <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce [animation-delay:0ms]" />
-                <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce [animation-delay:150ms]" />
-                <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce [animation-delay:300ms]" />
+                <span className="w-1 h-1 bg-gray-600 rounded-full animate-bounce [animation-delay:0ms]" />
+                <span className="w-1 h-1 bg-gray-600 rounded-full animate-bounce [animation-delay:150ms]" />
+                <span className="w-1 h-1 bg-gray-600 rounded-full animate-bounce [animation-delay:300ms]" />
               </div>
             </div>
           </div>
@@ -147,12 +143,12 @@ export function ChatPanel() {
 
         {/* Quick suggestions */}
         {showSuggestions && messages.length === 1 && (
-          <div className="pt-1 grid grid-cols-1 gap-1.5">
+          <div className="pt-1 space-y-1">
             {SUGGESTIONS.map((s) => (
               <button
                 key={s}
                 onClick={() => submit(s)}
-                className="text-left text-xs text-gray-400 bg-gray-800 hover:bg-gray-750 hover:text-gray-200 border border-gray-700 rounded-lg px-3 py-2 transition-colors"
+                className="w-full text-left text-[11px] text-gray-500 hover:text-gray-300 border border-[#1e1e26] hover:border-[#2a2a35] rounded px-3 py-1.5 transition-colors font-mono"
               >
                 {s}
               </button>
@@ -162,7 +158,7 @@ export function ChatPanel() {
       </div>
 
       {/* Input */}
-      <div className="flex gap-2 px-3 py-3 border-t border-gray-800 bg-gray-900/80">
+      <div className="flex gap-2 px-3 py-2.5 border-t border-[#1e1e26]">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -173,17 +169,17 @@ export function ChatPanel() {
             }
           }}
           placeholder="Ask about a verdict..."
-          className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-brand/50 transition-colors"
+          className="flex-1 bg-[#16161b] border border-[#1e1e26] rounded px-3 py-1.5 text-[12px] text-gray-200 placeholder-gray-700 focus:outline-none focus:border-brand/40 transition-colors"
         />
         <button
           onClick={() => submit()}
           disabled={!input.trim() || chat.isPending}
-          className="rounded-lg bg-brand hover:bg-orange-500 disabled:opacity-30 text-white px-3 py-1.5 transition-colors flex items-center justify-center"
+          className="rounded bg-brand hover:bg-brand-600 disabled:opacity-25 text-white px-3 py-1.5 transition-colors flex items-center justify-center"
         >
           {chat.isPending ? (
-            <Loader2 size={14} className="animate-spin" />
+            <Loader2 size={13} className="animate-spin" />
           ) : (
-            <Send size={14} />
+            <Send size={13} />
           )}
         </button>
       </div>

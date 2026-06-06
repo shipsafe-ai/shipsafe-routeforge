@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ShieldCheck, ShieldX, Clock, Loader2, ExternalLink,
-  GitMerge, AlertCircle, TrendingUp, CheckCircle2, Lightbulb, Plus,
+  GitMerge, AlertCircle, TrendingUp, CheckCircle2, Lightbulb, Plus, GitBranch,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState, useRef } from "react";
@@ -84,85 +84,45 @@ async function acceptSuggestion(mr_iid: number, idx: number): Promise<void> {
   if (!r.ok) throw new Error("Failed to add scenario");
 }
 
-function VerdictBadge({ verdict }: { verdict: VerdictEnum }) {
-  if (verdict === "BLOCK")
-    return (
-      <span className="flex items-center gap-1 text-red-400 font-bold text-sm animate-pulse">
-        <ShieldX size={15} /> BLOCK
-      </span>
-    );
-  if (verdict === "PASS")
-    return (
-      <span className="flex items-center gap-1 text-green-400 font-bold text-sm">
-        <ShieldCheck size={15} /> PASS
-      </span>
-    );
-  return (
-    <span className="flex items-center gap-1 text-yellow-400 font-bold text-sm">
-      <Clock size={15} /> PENDING
-    </span>
-  );
-}
-
+// CI status pill
 function CIBadge({ ps }: { ps?: PipelineStatus }) {
   if (!ps || ps.overall === "none") return null;
-  const map: Record<string, { color: string; dot: string; label: string }> = {
-    passing: { color: "text-green-400", dot: "bg-green-400", label: "CI passing" },
-    failing: { color: "text-red-400", dot: "bg-red-400", label: "CI failing" },
-    running: { color: "text-yellow-400", dot: "bg-yellow-400 animate-pulse", label: "CI running" },
-    pending: { color: "text-gray-400", dot: "bg-gray-500", label: "CI pending" },
+  const cfg: Record<string, { dot: string; text: string; label: string }> = {
+    passing: { dot: "bg-green-500",                     text: "text-green-500",  label: "passing" },
+    failing: { dot: "bg-red-500",                       text: "text-red-400",    label: "failing" },
+    running: { dot: "bg-yellow-400 animate-pulse",      text: "text-yellow-400", label: "running" },
+    pending: { dot: "bg-gray-500",                      text: "text-gray-500",   label: "pending" },
   };
-  const style = map[ps.overall] ?? { color: "text-gray-500", dot: "bg-gray-600", label: `CI ${ps.overall}` };
+  const s = cfg[ps.overall] ?? { dot: "bg-gray-600", text: "text-gray-500", label: ps.overall };
   return (
     <a
       href={ps.pipeline_url || undefined}
       target="_blank"
       rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}
-      className={`flex items-center gap-1 text-xs font-mono ${style.color} hover:underline`}
+      className={`inline-flex items-center gap-1 text-[11px] font-mono ${s.text} hover:underline cursor-pointer`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
-      {style.label}
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${s.dot}`} />
+      CI {s.label}
     </a>
   );
 }
 
-function ConfidenceMeter({ value }: { value: number }) {
+// Thin confidence bar
+function ConfidenceBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);
-  const color = pct >= 70 ? "bg-green-500" : pct >= 40 ? "bg-yellow-500" : "bg-red-500";
+  const fill = pct >= 70 ? "bg-green-500" : pct >= 40 ? "bg-yellow-500" : "bg-red-500";
   return (
     <div className="flex items-center gap-2">
-      <div className="flex-1 h-1 bg-gray-700 rounded-full overflow-hidden">
+      <div className="w-20 h-[3px] bg-gray-800 rounded-full overflow-hidden">
         <motion.div
-          className={`h-full ${color} rounded-full`}
+          className={`h-full ${fill} rounded-full`}
           initial={{ width: 0 }}
           animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.6, ease: "easeOut" }}
+          transition={{ duration: 0.5, ease: "easeOut" }}
         />
       </div>
-      <span className="text-xs text-gray-400 tabular-nums w-8">{pct}%</span>
-    </div>
-  );
-}
-
-function PassStats({ card }: { card: Verdict }) {
-  const delta = card.throughput_delta_pct ?? 0;
-  const passed = card.scenarios_passed ?? 0;
-  const total = card.scenarios_total ?? 0;
-  return (
-    <div className="flex items-center gap-3 mt-1.5">
-      {delta > 0 && (
-        <span className="flex items-center gap-1 text-xs text-green-400 font-mono">
-          <TrendingUp size={11} />
-          +{delta.toFixed(1)}% throughput
-        </span>
-      )}
-      {total > 0 && (
-        <span className="flex items-center gap-1 text-xs text-green-500 font-mono">
-          <CheckCircle2 size={11} />
-          {passed}/{total} scenarios
-        </span>
-      )}
+      <span className="text-[11px] text-gray-500 tabular font-mono w-7">{pct}%</span>
     </div>
   );
 }
@@ -173,102 +133,118 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
   const qc = useQueryClient();
   const isBlock = card.verdict === "BLOCK";
 
-  const approve = useMutation({
-    mutationFn: () => approveVerdict(card.mr_iid),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["verdicts"] }),
-  });
+  const approve    = useMutation({ mutationFn: () => approveVerdict(card.mr_iid),              onSuccess: () => qc.invalidateQueries({ queryKey: ["verdicts"] }) });
+  const makeIssue  = useMutation({ mutationFn: () => createIssue(card.mr_iid),                 onSuccess: () => qc.invalidateQueries({ queryKey: ["verdicts"] }) });
+  const makeWork   = useMutation({ mutationFn: () => createWorkItem(card.mr_iid),              onSuccess: () => qc.invalidateQueries({ queryKey: ["verdicts"] }) });
+  const addSuggest = useMutation({ mutationFn: (idx: number) => acceptSuggestion(card.mr_iid, idx), onSuccess: () => qc.invalidateQueries({ queryKey: ["scenarios"] }) });
 
-  const makeIssue = useMutation({
-    mutationFn: () => createIssue(card.mr_iid),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["verdicts"] }),
-  });
+  const ts = new Date(card.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
-  const makeWorkItem = useMutation({
-    mutationFn: () => createWorkItem(card.mr_iid),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["verdicts"] }),
-  });
-
-  const addSuggestion = useMutation({
-    mutationFn: (idx: number) => acceptSuggestion(card.mr_iid, idx),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["scenarios"] }),
-  });
-
-  const ts = new Date(card.timestamp).toLocaleString();
+  // Left border: the ONLY color signal — no background tints
+  const leftBorder = isBlock ? "border-l-[3px] border-l-red-500/70" : card.verdict === "PASS" ? "border-l-[3px] border-l-green-500/60" : "border-l-[3px] border-l-gray-700";
 
   return (
     <motion.div
       layout
-      initial={isNew ? { opacity: 0, y: -16, scale: 0.98 } : false}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.35, ease: "easeOut" }}
+      initial={isNew ? { opacity: 0, y: -12 } : false}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
       onClick={() => setOpen((v) => !v)}
       className={clsx(
-        "rounded-xl border cursor-pointer transition-colors duration-150",
-        isBlock
-          ? "border-red-900/70 bg-red-950/20 hover:bg-red-950/35 shadow-sm shadow-red-950/30"
-          : "border-green-900/50 bg-green-950/10 hover:bg-green-950/20 shadow-sm shadow-green-950/20"
+        "rounded-lg border border-[#1e1e26] bg-[#111215] cursor-pointer transition-colors duration-150 hover:bg-[#14141a]",
+        leftBorder
       )}
     >
-      {/* Card header */}
-      <div className="px-4 py-3 flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-gray-500 text-xs font-mono">MR !{card.mr_iid}</span>
-            <CIBadge ps={card.pipeline_status} />
-          </div>
-          {card.mr_url ? (
-            <a
-              href={card.mr_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="flex items-center gap-1 text-gray-100 font-medium text-sm hover:text-brand transition-colors truncate"
-            >
-              {card.mr_title}
-              <ExternalLink size={11} className="flex-shrink-0 text-gray-600" />
-            </a>
-          ) : (
-            <p className="text-gray-100 font-medium text-sm truncate">{card.mr_title}</p>
-          )}
-          {!isBlock && <PassStats card={card} />}
-          <p className="text-gray-600 text-xs mt-0.5">{ts}</p>
+      {/* Header row */}
+      <div className="px-4 py-3 flex items-start gap-3">
+        {/* Verdict icon */}
+        <div className="flex-shrink-0 mt-0.5">
+          {card.verdict === "BLOCK"
+            ? <ShieldX size={14} className="text-red-400" />
+            : card.verdict === "PASS"
+            ? <ShieldCheck size={14} className="text-green-400" />
+            : <Clock size={14} className="text-yellow-400" />}
         </div>
-        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-          <VerdictBadge verdict={card.verdict} />
-          <div className="w-24">
-            <ConfidenceMeter value={card.confidence} />
+
+        {/* Main content */}
+        <div className="flex-1 min-w-0">
+          {/* Top line: MR# + title */}
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="font-mono text-[11px] text-gray-600">!{card.mr_iid}</span>
+            {card.mr_url ? (
+              <a
+                href={card.mr_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-gray-200 text-sm font-medium hover:text-white transition-colors truncate"
+              >
+                {card.mr_title}
+              </a>
+            ) : (
+              <span className="text-gray-200 text-sm font-medium truncate">{card.mr_title}</span>
+            )}
           </div>
+
+          {/* Second line: metadata */}
+          <div className="flex items-center gap-3">
+            <CIBadge ps={card.pipeline_status} />
+            {card.verdict === "PASS" && (card.throughput_delta_pct ?? 0) > 0 && (
+              <span className="flex items-center gap-1 text-[11px] text-green-500 font-mono">
+                <TrendingUp size={10} /> +{card.throughput_delta_pct!.toFixed(1)}%
+              </span>
+            )}
+            {card.verdict === "PASS" && (card.scenarios_total ?? 0) > 0 && (
+              <span className="text-[11px] text-green-600 font-mono">
+                {card.scenarios_passed}/{card.scenarios_total} scenarios
+              </span>
+            )}
+            <span className="text-[11px] text-gray-600">{ts}</span>
+          </div>
+        </div>
+
+        {/* Right: verdict + confidence */}
+        <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
+          <span className={clsx(
+            "text-xs font-semibold font-mono tracking-wide",
+            isBlock ? "text-red-400" : card.verdict === "PASS" ? "text-green-400" : "text-yellow-400"
+          )}>
+            {card.verdict}
+          </span>
+          <ConfidenceBar value={card.confidence} />
           {card.posted && (
-            <span className="text-blue-400 text-xs flex items-center gap-0.5">
-              <GitMerge size={10} /> {card.mr_approved ? "approved" : "posted"}
+            <span className="text-[10px] text-gray-600 font-mono flex items-center gap-1">
+              <GitMerge size={9} />
+              {card.mr_approved ? "approved" : "posted"}
             </span>
           )}
         </div>
       </div>
 
-      {/* Expanded detail */}
+      {/* Expanded content */}
       <AnimatePresence>
         {open && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: "easeInOut" }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
             onClick={(e) => e.stopPropagation()}
             className="overflow-hidden"
           >
-            <div className="border-t border-gray-800">
-              {/* Tab bar */}
-              <div className="flex border-b border-gray-800">
+            <div className="border-t border-[#1e1e26]">
+              {/* Tabs */}
+              <div className="flex border-b border-[#1e1e26]">
                 {(["verdict", "diff"] as const).map((t) => (
                   <button
                     key={t}
                     onClick={() => setTab(t)}
-                    className={`px-4 py-2 text-xs font-medium transition-colors ${
+                    className={clsx(
+                      "px-4 py-2 text-[11px] font-medium transition-colors",
                       tab === t
-                        ? "text-gray-100 border-b-2 border-brand -mb-px"
-                        : "text-gray-500 hover:text-gray-300"
-                    }`}
+                        ? "text-gray-100 border-b border-brand -mb-px"
+                        : "text-gray-600 hover:text-gray-400"
+                    )}
                   >
                     {t === "verdict" ? "Verdict" : "Diff"}
                   </button>
@@ -280,184 +256,186 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
                   <DiffViewer mrIid={card.mr_iid} failingFunctions={card.changed_functions ?? []} />
                 </div>
               ) : (
-              <div className="px-4 py-4 space-y-4">
-              {/* Reasoning */}
-              <div>
-                <p className="text-gray-500 text-xs uppercase tracking-wide mb-1">Reasoning</p>
-                <p className="text-gray-300 text-sm leading-relaxed">{card.reasoning}</p>
-              </div>
+                <div className="px-4 py-4 space-y-4">
 
-              {/* Affected scenarios (BLOCK) */}
-              {isBlock && card.affected_scenarios.length > 0 && (
-                <div>
-                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5">Affected scenarios</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {card.affected_scenarios.map((s) => (
-                      <span key={s} className="font-mono text-xs bg-red-950/40 border border-red-900/50 text-red-300 px-2 py-0.5 rounded">
-                        {s}
-                      </span>
-                    ))}
+                  {/* Reasoning */}
+                  <div>
+                    <SectionLabel>Reasoning</SectionLabel>
+                    <p className="text-gray-300 text-sm leading-relaxed">{card.reasoning}</p>
                   </div>
-                </div>
-              )}
 
-              {/* PASS: scenarios passed list */}
-              {!isBlock && (card.scenarios_total ?? 0) > 0 && (
-                <div>
-                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5">Scenarios</p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-green-400 text-xs font-mono">
-                      ✓ {card.scenarios_passed}/{card.scenarios_total} passed
-                    </span>
-                    {(card.throughput_delta_pct ?? 0) > 0 && (
-                      <span className="text-green-400 text-xs font-mono">
-                        · +{card.throughput_delta_pct?.toFixed(1)}% throughput improvement
-                      </span>
+                  {/* Affected scenarios */}
+                  {isBlock && card.affected_scenarios.length > 0 && (
+                    <div>
+                      <SectionLabel>Failing scenarios</SectionLabel>
+                      <div className="flex flex-wrap gap-1.5">
+                        {card.affected_scenarios.map((s) => (
+                          <span key={s} className="font-mono text-[11px] bg-red-950/30 border border-red-900/40 text-red-300 px-2 py-px rounded">
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PASS: scenarios */}
+                  {!isBlock && (card.scenarios_total ?? 0) > 0 && (
+                    <div>
+                      <SectionLabel>Scenarios</SectionLabel>
+                      <div className="flex items-center gap-3">
+                        <span className="text-green-400 text-[11px] font-mono">
+                          {card.scenarios_passed}/{card.scenarios_total} passed
+                        </span>
+                        {(card.throughput_delta_pct ?? 0) > 0 && (
+                          <span className="text-green-400 text-[11px] font-mono">
+                            +{card.throughput_delta_pct?.toFixed(1)}% throughput
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Changed functions */}
+                  {(card.changed_functions?.length ?? 0) > 0 && (
+                    <div>
+                      <SectionLabel>Changed functions</SectionLabel>
+                      <div className="flex flex-wrap gap-1.5">
+                        {card.changed_functions!.map((fn) => (
+                          <span key={fn} className="font-mono text-[11px] bg-gray-800/60 border border-[#1e1e26] text-gray-400 px-2 py-px rounded">
+                            {fn}()
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CI failing jobs */}
+                  {(card.pipeline_status?.failing_jobs?.length ?? 0) > 0 && (
+                    <div>
+                      <SectionLabel icon={<AlertCircle size={10} className="text-red-400" />}>Failing CI jobs</SectionLabel>
+                      <div className="flex flex-wrap gap-1.5">
+                        {card.pipeline_status?.failing_jobs?.map((j) => (
+                          <span key={j} className="font-mono text-[11px] bg-red-950/20 border border-red-900/30 text-red-400 px-2 py-px rounded">
+                            {j}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Injection warning */}
+                  {card.injection_blocked && (
+                    <p className="text-yellow-500 text-[11px] flex items-center gap-1.5">
+                      <AlertCircle size={11} /> Prompt injection detected in diff — verdict independently verified
+                    </p>
+                  )}
+
+                  {/* Pipeline log */}
+                  <PipelineLog mrIid={card.mr_iid} />
+
+                  {/* AI-suggested scenarios */}
+                  {(card.suggested_scenarios?.length ?? 0) > 0 && (
+                    <div>
+                      <SectionLabel icon={<Lightbulb size={10} className="text-yellow-400" />}>Suggested scenarios</SectionLabel>
+                      <div className="space-y-2">
+                        {card.suggested_scenarios!.map((s, idx) => (
+                          <div key={s.scenario_id} className="flex items-start gap-2 bg-[#17171c] border border-[#1e1e26] rounded px-3 py-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono text-[11px] text-gray-300">{s.scenario_id}</span>
+                                {s.crisis_mode && (
+                                  <span className="text-[10px] bg-red-950/40 border border-red-900/40 text-red-400 px-1 rounded">crisis</span>
+                                )}
+                                <span className="text-[10px] text-gray-600 font-mono">{s.strait_id}</span>
+                              </div>
+                              <p className="text-[11px] text-gray-500 mt-px">{s.description}</p>
+                              <p className="text-[10px] text-yellow-700 mt-px italic">{s.rationale}</p>
+                            </div>
+                            <button
+                              onClick={() => addSuggest.mutate(idx)}
+                              disabled={addSuggest.isPending}
+                              className="flex-shrink-0 flex items-center gap-1 text-[11px] text-brand hover:text-orange-400 border border-brand/30 hover:border-orange-400/60 rounded px-2 py-1 transition-colors disabled:opacity-40"
+                            >
+                              <Plus size={10} /> Add
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Comment draft */}
+                  <div>
+                    <SectionLabel>Comment draft</SectionLabel>
+                    <div className="bg-gray-950 rounded border border-[#1e1e26] p-3">
+                      <pre className="text-gray-400 text-[11px] font-mono whitespace-pre-wrap leading-relaxed">{card.comment_draft}</pre>
+                    </div>
+                  </div>
+
+                  {/* External links */}
+                  <div className="flex flex-wrap gap-3">
+                    {card.issue_url && (
+                      <a href={card.issue_url} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-[11px] text-blue-400 hover:underline">
+                        <ExternalLink size={10} /> Tracking issue
+                      </a>
+                    )}
+                    {card.work_item_url && (
+                      <a href={card.work_item_url} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-[11px] text-purple-400 hover:underline">
+                        <ExternalLink size={10} /> Work item (Ultimate)
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {!card.posted && (
+                      <button
+                        onClick={() => approve.mutate()}
+                        disabled={approve.isPending}
+                        className="flex-1 rounded bg-brand hover:bg-orange-500 disabled:opacity-40 text-white font-medium py-2 text-xs transition-colors flex items-center justify-center gap-2"
+                      >
+                        {approve.isPending && <Loader2 size={11} className="animate-spin" />}
+                        Approve &amp; Post to GitLab
+                      </button>
+                    )}
+                    {isBlock && !card.issue_url && (
+                      <button
+                        onClick={() => makeIssue.mutate()}
+                        disabled={makeIssue.isPending}
+                        className="flex-1 rounded bg-[#17171c] hover:bg-[#1b1b23] border border-[#1e1e26] disabled:opacity-40 text-gray-300 font-medium py-2 text-xs transition-colors flex items-center justify-center gap-2"
+                      >
+                        {makeIssue.isPending && <Loader2 size={11} className="animate-spin" />}
+                        Create Issue
+                      </button>
+                    )}
+                    {isBlock && !card.work_item_url && (
+                      <button
+                        onClick={() => makeWork.mutate()}
+                        disabled={makeWork.isPending}
+                        className="flex-1 rounded bg-[#17171c] hover:bg-[#1b1b23] border border-purple-900/40 disabled:opacity-40 text-purple-400 font-medium py-2 text-xs transition-colors flex items-center justify-center gap-2"
+                      >
+                        {makeWork.isPending && <Loader2 size={11} className="animate-spin" />}
+                        Create Work Item
+                      </button>
                     )}
                   </div>
                 </div>
-              )}
-
-              {/* Changed functions */}
-              {card.changed_functions && card.changed_functions.length > 0 && (
-                <div>
-                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5">Changed functions</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {card.changed_functions.map((fn) => (
-                      <span key={fn} className="font-mono text-xs bg-gray-800 border border-gray-700 text-gray-300 px-2 py-0.5 rounded">
-                        {fn}()
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* CI failing jobs */}
-              {(card.pipeline_status?.failing_jobs?.length ?? 0) > 0 && (
-                <div>
-                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5 flex items-center gap-1">
-                    <AlertCircle size={11} className="text-red-400" /> Failing CI jobs
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {card.pipeline_status?.failing_jobs?.map((j) => (
-                      <span key={j} className="font-mono text-xs bg-red-950/30 border border-red-900/40 text-red-300 px-2 py-0.5 rounded">
-                        {j}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Injection warning */}
-              {card.injection_blocked && (
-                <p className="text-yellow-400 text-xs flex items-center gap-1">
-                  ⚠ Prompt injection detected in diff — verdict independently reviewed
-                </p>
-              )}
-
-              {/* Live pipeline log */}
-              <PipelineLog mrIid={card.mr_iid} />
-
-              {/* Comment draft */}
-              <div>
-                <p className="text-gray-500 text-xs uppercase tracking-wide mb-2">Comment draft</p>
-                <div className="bg-gray-950 rounded-lg p-3 border border-gray-800">
-                  <pre className="text-gray-300 text-xs whitespace-pre-wrap leading-relaxed">{card.comment_draft}</pre>
-                </div>
-              </div>
-
-              {/* AI-suggested scenarios */}
-              {(card.suggested_scenarios?.length ?? 0) > 0 && (
-                <div>
-                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1.5 flex items-center gap-1">
-                    <Lightbulb size={11} className="text-yellow-400" /> Suggested scenarios
-                  </p>
-                  <div className="space-y-2">
-                    {card.suggested_scenarios!.map((s, idx) => (
-                      <div key={s.scenario_id} className="flex items-start gap-2 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2">
-                        <div className="flex-1 min-w-0">
-                          <span className="font-mono text-xs text-gray-300">{s.scenario_id}</span>
-                          {s.crisis_mode && (
-                            <span className="ml-1.5 text-xs bg-red-950/50 border border-red-900/50 text-red-400 px-1 rounded">crisis</span>
-                          )}
-                          <p className="text-xs text-gray-500 mt-0.5 truncate">{s.description}</p>
-                          <p className="text-xs text-yellow-600 mt-0.5 italic">{s.rationale}</p>
-                        </div>
-                        <button
-                          onClick={() => addSuggestion.mutate(idx)}
-                          disabled={addSuggestion.isPending}
-                          className="flex-shrink-0 flex items-center gap-1 text-xs text-brand hover:text-orange-400 border border-brand/40 hover:border-orange-400 rounded px-2 py-1 transition-colors disabled:opacity-40"
-                        >
-                          <Plus size={10} /> Add
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Issue / Work Item links */}
-              {card.issue_url && (
-                <a
-                  href={card.issue_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-xs text-blue-400 hover:underline"
-                >
-                  <ExternalLink size={11} /> View tracking issue
-                </a>
-              )}
-              {card.work_item_url && (
-                <a
-                  href={card.work_item_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-xs text-purple-400 hover:underline"
-                >
-                  <ExternalLink size={11} /> View work item (GitLab Ultimate)
-                </a>
-              )}
-
-              {/* Actions */}
-              <div className="flex flex-wrap gap-2 pt-1">
-                {!card.posted && (
-                  <button
-                    onClick={() => approve.mutate()}
-                    disabled={approve.isPending}
-                    className="flex-1 rounded-lg bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white font-semibold py-2 text-sm transition-colors flex items-center justify-center gap-2"
-                  >
-                    {approve.isPending && <Loader2 size={13} className="animate-spin" />}
-                    Approve &amp; Post to GitLab
-                  </button>
-                )}
-                {isBlock && !card.issue_url && (
-                  <button
-                    onClick={() => makeIssue.mutate()}
-                    disabled={makeIssue.isPending}
-                    className="flex-1 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-200 font-semibold py-2 text-sm transition-colors flex items-center justify-center gap-2"
-                  >
-                    {makeIssue.isPending && <Loader2 size={13} className="animate-spin" />}
-                    Create GitLab Issue
-                  </button>
-                )}
-                {isBlock && !card.work_item_url && (
-                  <button
-                    onClick={() => makeWorkItem.mutate()}
-                    disabled={makeWorkItem.isPending}
-                    className="flex-1 rounded-lg bg-purple-900/50 hover:bg-purple-900/70 border border-purple-800/50 disabled:opacity-50 text-purple-300 font-semibold py-2 text-sm transition-colors flex items-center justify-center gap-2"
-                  >
-                    {makeWorkItem.isPending && <Loader2 size={13} className="animate-spin" />}
-                    Create Work Item
-                  </button>
-                )}
-              </div>
-              </div>
               )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: React.ReactNode }) {
+  return (
+    <p className="text-[10px] text-gray-600 uppercase tracking-widest font-medium mb-1.5 flex items-center gap-1">
+      {icon}{children}
+    </p>
   );
 }
 
@@ -470,40 +448,36 @@ export function VerdictFeed() {
     refetchInterval: 10_000,
   });
 
-  // Track which MR IIDs are new since last render
   const newIids = new Set<number>();
   if (data) {
-    data.forEach((v) => {
-      if (!prevIidsRef.current.has(v.mr_iid)) newIids.add(v.mr_iid);
-    });
+    data.forEach((v) => { if (!prevIidsRef.current.has(v.mr_iid)) newIids.add(v.mr_iid); });
     prevIidsRef.current = new Set(data.map((v) => v.mr_iid));
   }
 
   if (isLoading)
     return (
-      <div className="flex items-center gap-2 text-gray-500 text-sm py-8">
-        <Loader2 size={16} className="animate-spin" />
-        Loading verdicts...
+      <div className="flex items-center gap-2 text-gray-600 text-sm py-8">
+        <Loader2 size={14} className="animate-spin" /> Loading…
       </div>
     );
   if (error)
-    return <div className="text-red-400 text-sm">Error: {(error as Error).message}</div>;
+    return <div className="text-red-400 text-xs py-4">Error: {(error as Error).message}</div>;
   if (!data?.length)
     return (
-      <div className="text-center py-16">
-        <ShieldCheck size={32} className="text-gray-700 mx-auto mb-3" />
+      <div className="text-center py-16 border border-dashed border-[#1e1e26] rounded-lg">
+        <GitBranch size={28} className="text-gray-700 mx-auto mb-3" />
         <p className="text-gray-500 text-sm">No verdicts yet</p>
-        <p className="text-gray-600 text-xs mt-1">Open a GitLab MR to trigger RouteForge</p>
+        <p className="text-gray-700 text-xs mt-1">Open a GitLab MR on the connected project to trigger RouteForge</p>
       </div>
     );
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between mb-1">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">
-          Recent verdicts
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-[11px] font-medium text-gray-500 uppercase tracking-widest">
+          Verdicts
         </h2>
-        <span className="text-xs text-gray-600">auto-refresh 10s</span>
+        <span className="text-[10px] text-gray-700 font-mono">↻ 10s</span>
       </div>
       <AnimatePresence mode="popLayout">
         {data.map((card) => (

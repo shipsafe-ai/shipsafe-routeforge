@@ -4,6 +4,10 @@ const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+      },
       colors: {
         brand: {
           DEFAULT: "#F97316",
@@ -13,8 +17,17 @@ const config: Config = {
           600: "#EA6C0A",
           700: "#C2570A",
         },
-        block: "#EF4444",
-        pass: "#22C55E",
+        block: "#F87171",
+        pass: "#4ADE80",
+        // Surface hierarchy
+        surface: {
+          DEFAULT: "#111215",
+          raised: "#16161b",
+          overlay: "#1b1b22",
+        },
+      },
+      borderColor: {
+        DEFAULT: "#1e1e26",
       },
     },
   },

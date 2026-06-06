@@ -56,9 +56,9 @@ export function PipelineLog({ mrIid }: { mrIid: number }) {
   const progress = latest ? (latest.step / latest.total) * 100 : 0;
 
   return (
-    <div className="mt-3 rounded-lg border border-gray-800 bg-gray-950 overflow-hidden">
+    <div className="mt-3 rounded-lg border border-[#1e1e26] bg-[#0d0d10] overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 bg-gray-900/50">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-[#1e1e26] bg-[#111215]">
         <Terminal size={12} className="text-gray-500" />
         <span className="text-xs text-gray-500 font-mono">pipeline log</span>
         <div className="ml-auto flex items-center gap-1.5">
@@ -76,7 +76,7 @@ export function PipelineLog({ mrIid }: { mrIid: number }) {
 
       {/* Progress bar */}
       {!finished && (
-        <div className="h-0.5 bg-gray-800">
+        <div className="h-0.5 bg-[#1e1e26]">
           <motion.div
             className="h-full bg-brand"
             animate={{ width: `${progress}%` }}
