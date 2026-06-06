@@ -3,13 +3,47 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ShieldCheck, ShieldX, Clock, Loader2, ExternalLink,
-  GitMerge, AlertCircle, TrendingUp, CheckCircle2, Lightbulb, Plus, GitBranch,
+  GitMerge, AlertCircle, TrendingUp, Lightbulb, Plus, GitBranch, Tag, CheckCircle2,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PipelineLog } from "./PipelineLog";
 import { DiffViewer } from "./DiffViewer";
+
+// Minimal markdown renderer — handles **bold**, *italic*, newlines
+function renderMarkdown(text: string): React.ReactNode[] {
+  return text.split("\n").map((line, li) => {
+    const parts: React.ReactNode[] = [];
+    let rest = line;
+    let key = 0;
+    while (rest.length > 0) {
+      const boldIdx = rest.indexOf("**");
+      if (boldIdx !== -1) {
+        if (boldIdx > 0) parts.push(<span key={key++}>{rest.slice(0, boldIdx)}</span>);
+        const endBold = rest.indexOf("**", boldIdx + 2);
+        if (endBold !== -1) {
+          parts.push(<strong key={key++} className="text-gray-200 font-semibold">{rest.slice(boldIdx + 2, endBold)}</strong>);
+          rest = rest.slice(endBold + 2);
+          continue;
+        }
+      }
+      const italicIdx = rest.indexOf("*");
+      if (italicIdx !== -1) {
+        if (italicIdx > 0) parts.push(<span key={key++}>{rest.slice(0, italicIdx)}</span>);
+        const endItalic = rest.indexOf("*", italicIdx + 1);
+        if (endItalic !== -1) {
+          parts.push(<em key={key++} className="text-gray-500 not-italic text-[10px]">{rest.slice(italicIdx + 1, endItalic)}</em>);
+          rest = rest.slice(endItalic + 1);
+          continue;
+        }
+      }
+      parts.push(<span key={key++}>{rest}</span>);
+      rest = "";
+    }
+    return <div key={li} className={li > 0 ? "mt-0.5" : ""}>{parts}</div>;
+  });
+}
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-o34wppiwiq-uc.a.run.app";
 
@@ -187,16 +221,37 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
           </div>
 
           {/* Second line: metadata */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <CIBadge ps={card.pipeline_status} />
             {card.verdict === "PASS" && (card.throughput_delta_pct ?? 0) > 0 && (
               <span className="flex items-center gap-1 text-[11px] text-green-500 font-mono">
                 <TrendingUp size={10} /> +{card.throughput_delta_pct!.toFixed(1)}%
               </span>
             )}
-            {card.verdict === "PASS" && (card.scenarios_total ?? 0) > 0 && (
-              <span className="text-[11px] text-green-600 font-mono">
+            {(card.scenarios_total ?? 0) > 0 && (
+              <span
+                title={`${card.scenarios_passed} scenarios triggered and passed. ${(card.scenarios_total ?? 0) - (card.scenarios_passed ?? 0)} not triggered — no matching code paths changed in this diff.`}
+                className={clsx(
+                  "text-[11px] font-mono cursor-help",
+                  card.verdict === "PASS" ? "text-green-600" : "text-red-500"
+                )}
+              >
                 {card.scenarios_passed}/{card.scenarios_total} scenarios
+              </span>
+            )}
+            {/* GitLab scoped label chip */}
+            <span className={clsx(
+              "inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-px rounded border",
+              isBlock
+                ? "text-red-400 border-red-900/50 bg-red-950/20"
+                : "text-green-400 border-green-900/50 bg-green-950/20"
+            )}>
+              <Tag size={8} /> routeforge::{card.verdict === "PASS" ? "passed" : "blocked"}
+            </span>
+            {/* MR approved badge */}
+            {card.mr_approved && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono text-green-500 border border-green-900/40 bg-green-950/20 px-1.5 py-px rounded">
+                <CheckCircle2 size={8} /> approved
               </span>
             )}
             <span className="text-[11px] text-gray-600">{ts}</span>
@@ -257,6 +312,46 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
                 </div>
               ) : (
                 <div className="px-4 py-4 space-y-4">
+
+                  {/* Top action — approve inline, not buried */}
+                  {!card.posted && (
+                    <div className="flex items-center gap-2 pb-1">
+                      <button
+                        onClick={() => approve.mutate()}
+                        disabled={approve.isPending}
+                        className="flex items-center gap-1.5 rounded bg-brand hover:bg-orange-500 disabled:opacity-40 text-white font-medium px-4 py-1.5 text-[11px] transition-colors"
+                      >
+                        {approve.isPending ? <Loader2 size={11} className="animate-spin" /> : <GitMerge size={11} />}
+                        Approve &amp; Post to GitLab
+                      </button>
+                      {isBlock && !card.issue_url && (
+                        <button
+                          onClick={() => makeIssue.mutate()}
+                          disabled={makeIssue.isPending}
+                          className="flex items-center gap-1.5 rounded border border-[#1e1e26] hover:border-[#2a2a35] text-gray-400 font-medium px-3 py-1.5 text-[11px] transition-colors"
+                        >
+                          {makeIssue.isPending && <Loader2 size={11} className="animate-spin" />}
+                          Create Issue
+                        </button>
+                      )}
+                      {isBlock && !card.work_item_url && (
+                        <button
+                          onClick={() => makeWork.mutate()}
+                          disabled={makeWork.isPending}
+                          className="flex items-center gap-1.5 rounded border border-purple-900/40 text-purple-400 font-medium px-3 py-1.5 text-[11px] transition-colors"
+                        >
+                          {makeWork.isPending && <Loader2 size={11} className="animate-spin" />}
+                          Work Item
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {card.posted && (
+                    <div className="flex items-center gap-2 text-[11px] text-green-500 font-mono pb-1">
+                      <CheckCircle2 size={11} />
+                      {card.mr_approved ? "Approved & posted to GitLab" : "Posted to GitLab"}
+                    </div>
+                  )}
 
                   {/* Reasoning */}
                   <div>
@@ -349,7 +444,7 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
                                 <span className="text-[10px] text-gray-600 font-mono">{s.strait_id}</span>
                               </div>
                               <p className="text-[11px] text-gray-500 mt-px">{s.description}</p>
-                              <p className="text-[10px] text-yellow-700 mt-px italic">{s.rationale}</p>
+                              <p className="text-[10px] text-yellow-700/60 mt-px line-clamp-2 leading-relaxed" title={s.rationale}>{s.rationale}</p>
                             </div>
                             <button
                               onClick={() => addSuggest.mutate(idx)}
@@ -364,11 +459,11 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
                     </div>
                   )}
 
-                  {/* Comment draft */}
+                  {/* Comment draft — rendered, not raw markdown */}
                   <div>
                     <SectionLabel>Comment draft</SectionLabel>
-                    <div className="bg-gray-950 rounded border border-[#1e1e26] p-3">
-                      <pre className="text-gray-400 text-[11px] font-mono whitespace-pre-wrap leading-relaxed">{card.comment_draft}</pre>
+                    <div className="bg-[#0d0d10] rounded border border-[#1e1e26] px-3 py-2.5 text-[11px] text-gray-400 leading-relaxed">
+                      {renderMarkdown(card.comment_draft)}
                     </div>
                   </div>
 
@@ -388,39 +483,6 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
                     )}
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {!card.posted && (
-                      <button
-                        onClick={() => approve.mutate()}
-                        disabled={approve.isPending}
-                        className="flex-1 rounded bg-brand hover:bg-orange-500 disabled:opacity-40 text-white font-medium py-2 text-xs transition-colors flex items-center justify-center gap-2"
-                      >
-                        {approve.isPending && <Loader2 size={11} className="animate-spin" />}
-                        Approve &amp; Post to GitLab
-                      </button>
-                    )}
-                    {isBlock && !card.issue_url && (
-                      <button
-                        onClick={() => makeIssue.mutate()}
-                        disabled={makeIssue.isPending}
-                        className="flex-1 rounded bg-[#17171c] hover:bg-[#1b1b23] border border-[#1e1e26] disabled:opacity-40 text-gray-300 font-medium py-2 text-xs transition-colors flex items-center justify-center gap-2"
-                      >
-                        {makeIssue.isPending && <Loader2 size={11} className="animate-spin" />}
-                        Create Issue
-                      </button>
-                    )}
-                    {isBlock && !card.work_item_url && (
-                      <button
-                        onClick={() => makeWork.mutate()}
-                        disabled={makeWork.isPending}
-                        className="flex-1 rounded bg-[#17171c] hover:bg-[#1b1b23] border border-purple-900/40 disabled:opacity-40 text-purple-400 font-medium py-2 text-xs transition-colors flex items-center justify-center gap-2"
-                      >
-                        {makeWork.isPending && <Loader2 size={11} className="animate-spin" />}
-                        Create Work Item
-                      </button>
-                    )}
-                  </div>
                 </div>
               )}
             </div>
