@@ -8,6 +8,7 @@ import {
 import { clsx } from "clsx";
 import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { PipelineLog } from "./PipelineLog";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-336382452417.us-central1.run.app";
 
@@ -293,6 +294,9 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
                   ⚠ Prompt injection detected in diff — verdict independently reviewed
                 </p>
               )}
+
+              {/* Live pipeline log */}
+              <PipelineLog mrIid={card.mr_iid} />
 
               {/* Comment draft */}
               <div>

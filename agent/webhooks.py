@@ -9,15 +9,17 @@ from collections import OrderedDict
 from typing import Any
 
 import httpx
+import json
 import structlog
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from agent.config import get_secret
 from agent.orchestrator import RouteForgeOrchestrator, PipelineResult
 from agent.specialists.chat_handler import ChatHandler
+from agent import pipeline_log
 
 log = structlog.get_logger()
 
@@ -178,6 +180,40 @@ async def chat_endpoint(body: ChatRequest) -> JSONResponse:
         context = {k: v for k, v in context.items() if k != "diffs"}
     response = await handler.handle_free_text(body.message, context)
     return JSONResponse(content={"response": response})
+
+
+# ---------------------------------------------------------------------------
+# Live pipeline log stream (SSE)
+# ---------------------------------------------------------------------------
+
+@app.get("/verdicts/{mr_iid}/log")
+async def stream_pipeline_log(mr_iid: int) -> StreamingResponse:
+    async def generator():
+        # Replay stored events first (catches clients that connect after pipeline finishes)
+        stored = pipeline_log.get_stored(mr_iid)
+        for entry in stored:
+            yield f"data: {json.dumps(entry)}\n\n"
+        if stored and stored[-1].get("done"):
+            return  # pipeline already done — nothing more to stream
+
+        q = pipeline_log.subscribe(mr_iid)
+        try:
+            while True:
+                try:
+                    entry = await asyncio.wait_for(q.get(), timeout=30.0)
+                    yield f"data: {json.dumps(entry)}\n\n"
+                    if entry.get("done"):
+                        break
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            pipeline_log.unsubscribe(mr_iid, q)
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ---------------------------------------------------------------------------
