@@ -1,0 +1,30 @@
+[
+  {
+    "scenario_id": "claims_critical_triage_crisis_01",
+    "domain": "claims_routing",
+    "description": "Critical injury claim — routing logic must escalate to specialist, not auto-settle",
+    "crisis_mode": true,
+    "critical_keywords_removed": ["priority_triage", "specialist_route", "critical_coverage", "escalate_claim"],
+    "expected_blocked": true,
+    "expected_rerouted": false,
+    "notes": "Severity >= 8 must never hit auto-settlement path"
+  },
+  {
+    "scenario_id": "claims_auto_settle_normal_01",
+    "domain": "claims_routing",
+    "description": "Low-severity property claim — auto-settlement path, no specialist needed",
+    "crisis_mode": false,
+    "expected_blocked": false,
+    "expected_rerouted": false,
+    "notes": "Damage < $5k, single claimant, clear liability"
+  },
+  {
+    "scenario_id": "claims_standard_routing_normal_01",
+    "domain": "claims_routing",
+    "description": "Mid-tier claim routed to regional adjuster — standard workflow",
+    "crisis_mode": false,
+    "expected_blocked": false,
+    "expected_rerouted": false,
+    "notes": "Baseline routing: $5k-$50k, adjuster pool assignment"
+  }
+]

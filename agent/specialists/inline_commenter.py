@@ -1,20 +1,15 @@
-"""InlineCommenter — posts inline diff thread on Hormuz removal line via MCP."""
+"""InlineCommenter — posts and resolves inline diff threads via MCP."""
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from typing import Any
 
-import httpx
 import structlog
 
-log = structlog.get_logger()
+from agent.mcp_client import call_tool_json
 
-_MCP_URL = os.environ.get(
-    "ZEREIGHT_MCP_URL",
-    "https://routeforge-mcp-336382452417.us-central1.run.app/mcp",
-)
+log = structlog.get_logger()
 
 _HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _HORMUZ_REMOVED = re.compile(r'^-\s+if\s+["\']HORMUZ["\']')
@@ -32,12 +27,12 @@ class InlineCommenter:
         diffs: list[dict[str, Any]],
         diff_refs: dict[str, str],
         affected_scenarios: list[str],
-    ) -> bool:
-        """Post inline thread on the line that removed Hormuz avoidance. Returns True on success."""
+    ) -> str | None:
+        """Post inline thread on the removed Hormuz avoidance line. Returns discussion_id or None."""
         location = _find_hormuz_removal(diffs)
         if not location:
             log.info("inline_commenter.no_target_line", mr_iid=mr_iid)
-            return False
+            return None
 
         file_path, old_line, new_path = location
         scenarios_str = (
@@ -54,7 +49,6 @@ class InlineCommenter:
             f"🤖 *RouteForge AI Safety Gate*"
         )
 
-        # line_code format: sha1(file_path)_{old_line}_{new_line}  (0 = no new line for deleted)
         file_sha = hashlib.sha1(file_path.encode()).hexdigest()
         line_code = f"{file_sha}_{old_line}_0"
 
@@ -68,37 +62,50 @@ class InlineCommenter:
             "old_line": old_line,
             "new_line": None,
             "line_range": {
-                "start": {
-                    "line_code": line_code,
-                    "type": "old",
-                    "old_line": old_line,
-                    "new_line": None,
-                },
-                "end": {
-                    "line_code": line_code,
-                    "type": "old",
-                    "old_line": old_line,
-                    "new_line": None,
-                },
+                "start": {"line_code": line_code, "type": "old", "old_line": old_line, "new_line": None},
+                "end":   {"line_code": line_code, "type": "old", "old_line": old_line, "new_line": None},
             },
         }
 
-        success = await _mcp_create_thread(
-            pat=self._pat,
-            project_id=str(project_id),
-            mr_iid=str(mr_iid),
-            body=body,
-            position=position,
-        )
-        log.info("inline_commenter.result", mr_iid=mr_iid, success=success, old_line=old_line, file=file_path)
-        return success
+        try:
+            result = await call_tool_json(self._pat, "create_merge_request_thread", {
+                "project_id": str(project_id),
+                "merge_request_iid": str(mr_iid),
+                "body": body,
+                "position": position,
+            })
+            disc_id = result.get("id", "")
+            log.info("inline_commenter.thread_posted", mr_iid=mr_iid, discussion_id=disc_id, old_line=old_line)
+            return disc_id or None
+        except Exception as exc:
+            log.warning("inline_commenter.mcp_error", error=str(exc), mr_iid=mr_iid)
+            return None
+
+    async def resolve_block_threads(
+        self,
+        project_id: int,
+        mr_iid: int,
+        discussion_ids: list[str],
+    ) -> int:
+        """Resolve stored inline block threads when MR flips to PASS. Returns count resolved."""
+        resolved = 0
+        for disc_id in discussion_ids:
+            try:
+                await call_tool_json(self._pat, "resolve_merge_request_thread", {
+                    "project_id": str(project_id),
+                    "merge_request_iid": str(mr_iid),
+                    "discussion_id": disc_id,
+                    "resolved": True,
+                })
+                resolved += 1
+                log.info("inline_commenter.thread_resolved", mr_iid=mr_iid, discussion_id=disc_id)
+            except Exception:
+                log.warning("inline_commenter.resolve_error", mr_iid=mr_iid, discussion_id=disc_id)
+        return resolved
 
 
 def _find_hormuz_removal(diffs: list[dict[str, Any]]) -> tuple[str, int, str] | None:
-    """Return (old_path, old_line_number, new_path) for a PERMANENT Hormuz removal (not refactor).
-
-    Returns None if the Hormuz check was removed AND re-added (i.e. refactored, not deleted).
-    """
+    """Return (old_path, old_line_number, new_path) for a PERMANENT Hormuz removal (not refactor)."""
     for diff in diffs:
         diff_text = diff.get("diff", "")
         old_path = diff.get("old_path") or diff.get("new_path", "")
@@ -120,70 +127,9 @@ def _find_hormuz_removal(diffs: list[dict[str, Any]]) -> tuple[str, int, str] | 
                 old_line += 1
                 if _HORMUZ_REMOVED.match(line) and removed_at is None:
                     removed_at = old_line
-            elif line.startswith("+"):
-                pass
-            else:
+            elif not line.startswith("+"):
                 old_line += 1
 
-        # Only flag if removed and NOT re-added elsewhere in the same diff
         if removed_at is not None and not readded:
             return (old_path, removed_at, new_path)
     return None
-
-
-async def _mcp_create_thread(
-    pat: str,
-    project_id: str,
-    mr_iid: str,
-    body: str,
-    position: dict[str, Any],
-) -> bool:
-    base_headers = {
-        "Private-Token": pat,
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            init_resp = await client.post(
-                _MCP_URL,
-                headers=base_headers,
-                json={
-                    "jsonrpc": "2.0", "id": 1, "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {},
-                        "clientInfo": {"name": "routeforge-inline", "version": "1.0.0"},
-                    },
-                },
-            )
-            init_resp.raise_for_status()
-            session_id = init_resp.headers.get("mcp-session-id", "")
-            session_headers = {**base_headers, "mcp-session-id": session_id}
-
-            await client.post(
-                _MCP_URL, headers=session_headers,
-                json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
-            )
-
-            resp = await client.post(
-                _MCP_URL,
-                headers=session_headers,
-                json={
-                    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                    "params": {
-                        "name": "create_merge_request_thread",
-                        "arguments": {
-                            "project_id": project_id,
-                            "merge_request_iid": mr_iid,
-                            "body": body,
-                            "position": position,
-                        },
-                    },
-                },
-            )
-            resp.raise_for_status()
-            return True
-    except Exception as exc:
-        log.warning("inline_commenter.mcp_error", error=str(exc), mr_iid=mr_iid)
-        return False

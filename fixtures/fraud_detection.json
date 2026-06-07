@@ -1,0 +1,30 @@
+[
+  {
+    "scenario_id": "fraud_velocity_crisis_01",
+    "domain": "fraud_detection",
+    "description": "High-velocity transaction burst — fraud gate must block suspicious pattern",
+    "crisis_mode": true,
+    "critical_keywords_removed": ["velocity_check", "fraud_score", "threshold_exceeded", "block_transaction"],
+    "expected_blocked": true,
+    "expected_rerouted": false,
+    "notes": "Algorithm must halt transactions exceeding 50 TPS from single origin"
+  },
+  {
+    "scenario_id": "fraud_high_value_normal_01",
+    "domain": "fraud_detection",
+    "description": "High-value transfer in normal operating conditions — should route with enhanced checks",
+    "crisis_mode": false,
+    "expected_blocked": false,
+    "expected_rerouted": false,
+    "notes": "Standard high-value routing with KYC validation"
+  },
+  {
+    "scenario_id": "fraud_standard_tx_normal_01",
+    "domain": "fraud_detection",
+    "description": "Standard retail transaction — fast-path routing, no anomalies",
+    "crisis_mode": false,
+    "expected_blocked": false,
+    "expected_rerouted": false,
+    "notes": "Baseline: score < 0.3, auto-approve path"
+  }
+]

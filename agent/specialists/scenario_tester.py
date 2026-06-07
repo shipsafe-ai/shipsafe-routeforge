@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 
-FIXTURES_PATH = Path(__file__).parent.parent.parent / "fixtures" / "hormuz_crisis.json"
+FIXTURES_DIR = Path(__file__).parent.parent.parent / "fixtures"
 
 # Patterns for crisis-aware routing logic changes
 _CRISIS_BLOCK_REMOVED = re.compile(
@@ -40,9 +40,14 @@ class ScenarioResult:
 
 class ScenarioTester:
     def load_fixtures(self) -> list[dict[str, Any]]:
-        """Load Hormuz crisis scenario fixtures from disk."""
-        with FIXTURES_PATH.open() as f:
-            return json.load(f)
+        """Load all scenario fixture files from the fixtures directory."""
+        fixtures: list[dict[str, Any]] = []
+        for path in sorted(FIXTURES_DIR.glob("*.json")):
+            with path.open() as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    fixtures.extend(data)
+        return fixtures
 
     def run_against_fixtures(
         self,
@@ -99,6 +104,8 @@ class ScenarioTester:
             "crisis_block_added": crisis_block_added,
             "throughput_delta": throughput_delta,
             "reroute_logic_added": reroute_added,
+            "added_text": added_text,
+            "removed_text": removed_text,
         }
 
     def _evaluate_fixture(
@@ -118,6 +125,18 @@ class ScenarioTester:
                 # Diff doesn't handle crisis — algorithm passes strait through (dangerous)
                 route_blocked = False
                 route_rerouted = False
+        elif crisis and fixture.get("critical_keywords_removed"):
+            # Generic domain (fraud, claims, etc.): check if critical logic was removed
+            removed = signals.get("removed_text", "").lower()
+            added = signals.get("added_text", "").lower()
+            any_removed = any(kw.lower() in removed for kw in fixture["critical_keywords_removed"])
+            any_readded = any(kw.lower() in added for kw in fixture["critical_keywords_removed"])
+            if any_removed and not any_readded:
+                route_blocked = False
+                route_rerouted = False
+            else:
+                route_blocked = expected_blocked
+                route_rerouted = expected_rerouted
         else:
             route_blocked = False
             route_rerouted = False

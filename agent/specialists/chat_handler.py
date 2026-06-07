@@ -16,6 +16,7 @@ HELP_TEXT = """**RouteForge commands** (use in MR comments):
 - `@routeforge explain` — why was this MR blocked or passed?
 - `@routeforge scenarios` — which scenarios failed and why?
 - `@routeforge status` — verdict + pipeline status summary
+- `@routeforge rescan` — re-run full safety analysis on latest diff
 - `@routeforge help` — show this message"""
 
 

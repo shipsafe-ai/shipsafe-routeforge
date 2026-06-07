@@ -554,7 +554,7 @@ async def gitlab_webhook(
             project_id = payload.get("project_id") or payload.get("project", {}).get("id")
             if mr_iid and project_id:
                 asyncio.create_task(
-                    handle_routeforge_mention(note_text, int(mr_iid), str(project_id))
+                    handle_routeforge_mention(note_text, int(mr_iid), str(project_id), payload)
                 )
 
         return JSONResponse(content={"status": "ok", "object_kind": "note"})
@@ -699,7 +699,8 @@ async def _apply_verdict_label(pat: str, project_id: str, mr_iid: int, verdict: 
 
 
 async def handle_routeforge_mention(
-    note_text: str, mr_iid: int, project_id: str
+    note_text: str, mr_iid: int, project_id: str,
+    note_payload: dict[str, Any] | None = None,
 ) -> None:
     """Respond to @routeforge commands posted in GitLab MR comments."""
     try:
@@ -709,20 +710,48 @@ async def handle_routeforge_mention(
             return
 
         command, args = parsed
-        # Diffs excluded from context — not needed for chat
-        raw_ctx = _verdicts.get(mr_iid)
-        ctx = {k: v for k, v in raw_ctx.items() if k != "diffs"} if raw_ctx else None
-
-        response = await handler.handle_command(command, args, ctx)
         pat = get_secret("GITLAB_PAT")
 
-        body = f"🤖 **@routeforge `{command}`**:\n\n{response}"
+        # rescan: re-run full pipeline on latest diff
+        if command == "rescan":
+            mr_info = (note_payload or {}).get("merge_request", {})
+            stored = _verdicts.get(mr_iid, {})
+            rescan_payload = {
+                "object_kind": "merge_request",
+                "project": (note_payload or {}).get("project", {"id": int(project_id)}),
+                "object_attributes": {
+                    "iid": mr_iid,
+                    "title": mr_info.get("title") or stored.get("mr_title", f"MR !{mr_iid}"),
+                    "state": "opened",
+                    "action": "open",
+                    "source_branch": mr_info.get("source_branch", ""),
+                    "target_branch": mr_info.get("target_branch", "main"),
+                    "last_commit": mr_info.get("last_commit") or {"id": "rescan", "message": "rescan"},
+                    "url": mr_info.get("url") or stored.get("mr_url", ""),
+                },
+                "changes": {},
+            }
+            asyncio.create_task(run_pipeline(rescan_payload))
+            body = f"🤖 **@routeforge `rescan`**:\n\n🔄 Rescan queued for MR !{mr_iid}. New verdict in ~30s."
+            async with httpx.AsyncClient(timeout=30) as client:
+                await client.post(
+                    f"https://gitlab.com/api/v4/projects/{project_id}/merge_requests/{mr_iid}/notes",
+                    headers={"PRIVATE-TOKEN": pat},
+                    json={"body": body},
+                )
+            log.info("rescan.queued", mr_iid=mr_iid)
+            return
+
+        # All other commands via ChatHandler
+        raw_ctx = _verdicts.get(mr_iid)
+        ctx = {k: v for k, v in raw_ctx.items() if k != "diffs"} if raw_ctx else None
+        response = await handler.handle_command(command, args, ctx)
 
         async with httpx.AsyncClient(timeout=30) as client:
             await client.post(
                 f"https://gitlab.com/api/v4/projects/{project_id}/merge_requests/{mr_iid}/notes",
                 headers={"PRIVATE-TOKEN": pat},
-                json={"body": body},
+                json={"body": f"🤖 **@routeforge `{command}`**:\n\n{response}"},
             )
         log.info("routeforge_mention.replied", mr_iid=mr_iid, command=command)
 
@@ -814,6 +843,27 @@ async def _post_inline_discussion(
 # Verdict store
 # ---------------------------------------------------------------------------
 
+async def _post_block_thread_and_store(
+    commenter: InlineCommenter,
+    project_id: Any,
+    mr_iid: int,
+    diffs: list[dict[str, Any]],
+    diff_refs: dict[str, str],
+    affected_scenarios: list[str],
+) -> None:
+    """Post block thread and store the returned discussion_id in the verdict."""
+    disc_id = await commenter.post_block_thread(
+        project_id=project_id,
+        mr_iid=mr_iid,
+        diffs=diffs,
+        diff_refs=diff_refs,
+        affected_scenarios=affected_scenarios,
+    )
+    if disc_id and mr_iid in _verdicts:
+        _verdicts[mr_iid].setdefault("discussion_ids", []).append(disc_id)
+        log.info("inline_comment.discussion_id_stored", mr_iid=mr_iid, discussion_id=disc_id)
+
+
 def _store_verdict(result: PipelineResult, payload: dict[str, Any]) -> None:
     from datetime import datetime, timezone
 
@@ -848,6 +898,8 @@ def _store_verdict(result: PipelineResult, payload: dict[str, Any]) -> None:
         "diffs": result.diffs,
         "diff_refs": result.diff_refs,
         "changed_functions": result.changed_functions,
+        # Inline thread discussion IDs — populated after post_block_thread completes
+        "discussion_ids": [],
         # Scenario stats for PASS/BLOCK card display
         "throughput_delta_pct": result.throughput_delta_pct,
         "scenarios_passed": result.scenarios_passed,
@@ -859,6 +911,12 @@ def _store_verdict(result: PipelineResult, payload: dict[str, Any]) -> None:
         "work_item_url": None,
         "mr_approved": False,
     }
+
+    # Capture previous verdict state BEFORE overwriting
+    from agent.specialists.risk_gate import VerdictEnum
+    prev = _verdicts.get(result.mr_iid, {})
+    prev_verdict = prev.get("verdict")
+    prev_discussion_ids = list(prev.get("discussion_ids", []))
 
     _verdicts[result.mr_iid] = entry
     if len(_verdicts) > 50:
@@ -875,20 +933,33 @@ def _store_verdict(result: PipelineResult, payload: dict[str, Any]) -> None:
         except Exception:
             log.exception("label.task_creation_error", mr_iid=result.mr_iid)
 
-    # Post inline diff thread on the dangerous line (BLOCK only, best-effort)
-    from agent.specialists.risk_gate import VerdictEnum
+    # Resolve existing inline threads when MR flips BLOCK → PASS
+    if (result.verdict.verdict == VerdictEnum.PASS
+            and prev_verdict == "BLOCK"
+            and prev_discussion_ids):
+        try:
+            pat = get_secret("GITLAB_PAT")
+            commenter = InlineCommenter(gitlab_pat=pat)
+            asyncio.create_task(
+                commenter.resolve_block_threads(
+                    project_id=entry["project_id"],
+                    mr_iid=result.mr_iid,
+                    discussion_ids=prev_discussion_ids,
+                )
+            )
+            log.info("inline_comment.resolve_queued", mr_iid=result.mr_iid, count=len(prev_discussion_ids))
+        except Exception:
+            log.exception("inline_comment.resolve_error", mr_iid=result.mr_iid)
+
+    # Post new inline thread on the dangerous line (BLOCK only, best-effort)
     if result.verdict.verdict == VerdictEnum.BLOCK and result.diff_refs and result.diffs:
         try:
             pat = get_secret("GITLAB_PAT")
             commenter = InlineCommenter(gitlab_pat=pat)
             asyncio.create_task(
-                commenter.post_block_thread(
-                    project_id=entry["project_id"],
-                    mr_iid=result.mr_iid,
-                    diffs=result.diffs,
-                    diff_refs=result.diff_refs,
-                    affected_scenarios=result.verdict.affected_scenarios,
-                )
+                _post_block_thread_and_store(commenter, entry["project_id"], result.mr_iid,
+                                             result.diffs, result.diff_refs,
+                                             result.verdict.affected_scenarios)
             )
         except Exception:
             log.exception("inline_comment.task_creation_error", mr_iid=result.mr_iid)
