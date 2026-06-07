@@ -30,6 +30,8 @@ class ScenarioResult:
     route_rerouted: bool
     throughput_delta_pct: float
     notes: str
+    expected_blocked: bool = False
+    expected_rerouted: bool = False
 
 
 class ScenarioTester:
@@ -116,4 +118,6 @@ class ScenarioTester:
             route_rerouted=route_rerouted,
             throughput_delta_pct=throughput_delta,
             notes=f"strait={strait_id} crisis={crisis}",
+            expected_blocked=expected_blocked,
+            expected_rerouted=expected_rerouted,
         )

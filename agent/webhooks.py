@@ -28,6 +28,35 @@ log = structlog.get_logger()
 
 app = FastAPI(title="RouteForge", version="0.2.0")
 
+
+def _demo_payload(mr: dict[str, Any]) -> dict[str, Any]:
+    web_url = "https://gitlab.com/shipsafe-ai/routing-engine"
+    return {
+        "object_kind": "merge_request",
+        "project": {"id": 82762386, "web_url": web_url},
+        "object_attributes": {
+            "iid": mr["iid"],
+            "title": mr["title"],
+            "state": "opened",
+            "action": "open",
+            "source_branch": mr["source_branch"],
+            "target_branch": "main",
+            "last_commit": {"id": "demo", "message": "demo seed"},
+            "url": f"{web_url}/-/merge_requests/{mr['iid']}",
+        },
+        "changes": {},
+    }
+
+
+@app.on_event("startup")
+async def _auto_seed() -> None:
+    """Auto-seed demo MRs on cold start so dashboard is never empty."""
+    await asyncio.sleep(3)
+    for mr in _DEMO_MRS:
+        asyncio.create_task(run_pipeline(_demo_payload(mr)))
+    log.info("startup.demo_seed", mr_count=len(_DEMO_MRS))
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -39,6 +68,12 @@ _orchestrator: RouteForgeOrchestrator | None = None
 
 # In-memory verdict store — keyed by mr_iid, capped at 50
 _verdicts: OrderedDict[int, dict[str, Any]] = OrderedDict()
+
+# Demo MRs — re-processed on cold start so dashboard is never empty
+_DEMO_MRS: list[dict[str, Any]] = [
+    {"iid": 1, "title": "perf: optimize dynamic_path throughput +12% via precomputed routing", "source_branch": "perf/optimize-throughput"},
+    {"iid": 3, "title": "perf: precomputed routing table — 12% throughput gain v1.2", "source_branch": "perf/routing-v1.2"},
+]
 
 # Tracks which projects have had scoped labels created (avoid repeated API calls)
 _labels_ensured: set[str] = set()
@@ -96,6 +131,38 @@ class GenerateScenarioRequest(BaseModel):
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "routeforge"}
+
+
+# ---------------------------------------------------------------------------
+# Demo seed endpoint — re-processes all configured MRs after cold start
+# ---------------------------------------------------------------------------
+
+_DEMO_MRS = [
+    {
+        "iid": 1,
+        "title": "perf: optimize dynamic_path throughput +12% via precomputed routing",
+        "source_branch": "perf/optimize-throughput",
+    },
+    {
+        "iid": 3,
+        "title": "perf: precomputed routing table — 12% throughput gain v1.2",
+        "source_branch": "perf/routing-v1.2",
+    },
+]
+
+@app.post("/demo/seed")
+async def demo_seed() -> JSONResponse:
+    """Re-fire demo MR webhooks so state rebuilds after a cold start."""
+    queued = []
+    for mr in _DEMO_MRS:
+        if mr["iid"] in _verdicts:
+            continue
+        asyncio.create_task(run_pipeline(_demo_payload(mr)))
+        queued.append(mr["iid"])
+    return JSONResponse({
+        "seeded": queued,
+        "already_present": [m["iid"] for m in _DEMO_MRS if m["iid"] in _verdicts],
+    })
 
 
 @app.get("/verdicts")
