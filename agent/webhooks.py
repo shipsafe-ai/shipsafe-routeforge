@@ -138,19 +138,6 @@ async def health() -> dict[str, str]:
 # Demo seed endpoint — re-processes all configured MRs after cold start
 # ---------------------------------------------------------------------------
 
-_DEMO_MRS = [
-    {
-        "iid": 1,
-        "title": "perf: optimize dynamic_path throughput +12% via precomputed routing",
-        "source_branch": "perf/optimize-throughput",
-    },
-    {
-        "iid": 3,
-        "title": "perf: precomputed routing table — 12% throughput gain v1.2",
-        "source_branch": "perf/routing-v1.2",
-    },
-]
-
 @app.post("/demo/seed")
 async def demo_seed() -> JSONResponse:
     """Re-fire demo MR webhooks so state rebuilds after a cold start."""

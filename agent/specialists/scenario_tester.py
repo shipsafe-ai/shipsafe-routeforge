@@ -92,7 +92,7 @@ class ScenarioTester:
 
         reroute_added = any(
             kw in added_text.lower()
-            for kw in ("cape_good_hope", "alternate", "reroute", "fallback_route")
+            for kw in ("cape_good_hope", "alternate", "reroute", "fallback_route", "zacpt", "cape_town")
         )
 
         return {
