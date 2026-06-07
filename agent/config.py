@@ -5,8 +5,14 @@ from google.cloud import secretmanager
 
 
 _PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "shipsafe-routeforge")
-_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 _VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION", "us-central1")
+
+AVAILABLE_MODELS: list[str] = [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+]
+_DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+_current_model: str = _DEFAULT_MODEL
 
 GITLAB_PROJECT_ID = os.environ.get("GITLAB_PROJECT_ID", "82762386")
 GITLAB_API_BASE = "https://gitlab.com/api/v4"
@@ -23,7 +29,14 @@ def get_secret(secret_id: str) -> str:
 
 
 def gemini_model() -> str:
-    return _GEMINI_MODEL
+    return _current_model
+
+
+def set_gemini_model(model: str) -> None:
+    global _current_model
+    if model not in AVAILABLE_MODELS:
+        raise ValueError(f"Unknown model {model!r}. Available: {AVAILABLE_MODELS}")
+    _current_model = model
 
 
 def vertex_location() -> str:

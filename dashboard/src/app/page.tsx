@@ -3,6 +3,7 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { StatsBar } from "@/components/StatsBar";
 import { ScenarioEditor } from "@/components/ScenarioEditor";
 import { TrendPanel } from "@/components/TrendPanel";
+import { ModelSelector } from "@/components/ModelSelector";
 
 export default function Home() {
   return (
@@ -13,9 +14,12 @@ export default function Home() {
           <span className="text-[10px] text-gray-600 font-mono border border-[#1e1e26] rounded px-1.5 py-px">v0.2</span>
         </div>
         <span className="text-gray-600 text-xs border-l border-[#1e1e26] pl-4">AI Safety Gate · GitLab MRs</span>
-        <div className="ml-auto flex items-center gap-1.5 text-[11px] text-gray-600 font-mono">
-          <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-          live
+        <div className="ml-auto flex items-center gap-3">
+          <ModelSelector />
+          <div className="flex items-center gap-1.5 text-[11px] text-gray-600 font-mono">
+            <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+            live
+          </div>
         </div>
       </header>
 

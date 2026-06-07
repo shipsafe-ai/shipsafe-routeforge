@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from agent.config import get_secret
+from agent.config import get_secret, gemini_model, set_gemini_model, AVAILABLE_MODELS
 from agent.orchestrator import RouteForgeOrchestrator, PipelineResult
 from agent.specialists.chat_handler import ChatHandler
 from agent.specialists.inline_commenter import InlineCommenter
@@ -133,6 +133,29 @@ class GenerateScenarioRequest(BaseModel):
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "routeforge"}
+
+
+# ---------------------------------------------------------------------------
+# Config endpoints — model selector
+# ---------------------------------------------------------------------------
+
+class ModelRequest(BaseModel):
+    model: str
+
+
+@app.get("/config")
+async def get_config() -> dict:
+    return {"model": gemini_model(), "available_models": AVAILABLE_MODELS}
+
+
+@app.post("/config/model")
+async def set_model(req: ModelRequest) -> dict:
+    try:
+        set_gemini_model(req.model)
+        log.info("config.model_changed", model=req.model)
+        return {"model": req.model, "status": "ok"}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------
