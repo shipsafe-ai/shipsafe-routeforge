@@ -47,7 +47,7 @@ class CommitWatcher:
             title=attrs["title"],
             source_branch=attrs["source_branch"],
             target_branch=attrs["target_branch"],
-            last_commit_sha=attrs["last_commit"]["id"],
+            last_commit_sha=(attrs.get("last_commit") or {}).get("id", ""),
             action=action,
         )
 
