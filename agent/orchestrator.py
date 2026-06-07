@@ -36,6 +36,7 @@ class PipelineResult:
     scenarios_passed: int = 0
     scenarios_total: int = 0
     suggested_scenarios: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    diff_refs: dict[str, str] = dataclasses.field(default_factory=dict)
 
 
 class RouteForgeOrchestrator:
@@ -70,10 +71,15 @@ class RouteForgeOrchestrator:
         TOTAL = 9
         pipeline_log.emit(iid, 1, TOTAL, f"CommitWatcher: MR !{iid} '{event.title}' — pipeline started")
 
-        # 2. Fetch diffs
+        # 2. Fetch diffs + diff_refs (base/head/start SHAs needed for inline comments)
         pipeline_log.emit(iid, 2, TOTAL, "CommitWatcher: fetching MR diffs")
         diffs = await self._watcher.fetch_mr_diffs(mr_iid=iid)
         diff_text = "\n".join(d.get("diff", "") for d in diffs)
+        try:
+            mr_details = await self._watcher.fetch_mr_details(mr_iid=iid)
+            diff_refs: dict[str, str] = mr_details.get("diff_refs") or {}
+        except Exception:
+            diff_refs = {}
 
         # 3. Prompt injection check on raw diff content (DATA boundary)
         pipeline_log.emit(iid, 3, TOTAL, "Critic: scanning diff for prompt injection")
@@ -189,6 +195,7 @@ class RouteForgeOrchestrator:
             scenarios_passed=scenarios_passed,
             scenarios_total=len(scenario_results),
             suggested_scenarios=suggestions,
+            diff_refs=diff_refs,
         )
 
 

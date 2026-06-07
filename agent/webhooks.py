@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from agent.config import get_secret
 from agent.orchestrator import RouteForgeOrchestrator, PipelineResult
 from agent.specialists.chat_handler import ChatHandler
+from agent.specialists.inline_commenter import InlineCommenter
 from agent.gemini_client import generate_json
 from agent import pipeline_log
 from agent import scenario_store
@@ -794,8 +795,9 @@ def _store_verdict(result: PipelineResult, payload: dict[str, Any]) -> None:
             "failing_jobs": ps.failing_jobs if ps else [],
             "coverage": ps.coverage if ps else None,
         },
-        # Stored for inline comments during approve — stripped from list API
+        # Stored for inline comments — stripped from list API
         "diffs": result.diffs,
+        "diff_refs": result.diff_refs,
         "changed_functions": result.changed_functions,
         # Scenario stats for PASS/BLOCK card display
         "throughput_delta_pct": result.throughput_delta_pct,
@@ -823,6 +825,24 @@ def _store_verdict(result: PipelineResult, payload: dict[str, Any]) -> None:
             )
         except Exception:
             log.exception("label.task_creation_error", mr_iid=result.mr_iid)
+
+    # Post inline diff thread on the dangerous line (BLOCK only, best-effort)
+    from agent.specialists.risk_gate import VerdictEnum
+    if result.verdict.verdict == VerdictEnum.BLOCK and result.diff_refs and result.diffs:
+        try:
+            pat = get_secret("GITLAB_PAT")
+            commenter = InlineCommenter(gitlab_pat=pat)
+            asyncio.create_task(
+                commenter.post_block_thread(
+                    project_id=entry["project_id"],
+                    mr_iid=result.mr_iid,
+                    diffs=result.diffs,
+                    diff_refs=result.diff_refs,
+                    affected_scenarios=result.verdict.affected_scenarios,
+                )
+            )
+        except Exception:
+            log.exception("inline_comment.task_creation_error", mr_iid=result.mr_iid)
 
 
 # ---------------------------------------------------------------------------
