@@ -2,140 +2,194 @@
 
 **An AI safety gate that catches the bugs your tests can't.**
 
-Normal code review catches syntax errors, style issues, and test failures.  
-It cannot catch: *"This change looks correct but will route a tanker through an active blockade."*
+Normal code review catches syntax errors, style issues, and failing tests.  
+It cannot catch: *"This change looks technically correct but will route a tanker through an active blockade."*
 
 RouteForge catches that. Before the MR merges.
 
 ---
 
-## The problem it solves
+## The problem
 
-A developer opens a merge request: `"perf: +12% throughput via precomputed routing tables"`.
+A developer opens a merge request: `perf: +12% throughput via precomputed routing tables`.
 
-Tests pass. CI is green. The diff looks clean. Reviewers see the performance numbers and approve.
+Tests pass. CI is green. The diff looks clean. Reviewers see the numbers and approve.
 
-What nobody noticed: buried in that 300-line diff, the crisis avoidance block was quietly deleted.
+What nobody noticed: buried in 300 lines of refactored code, this block was quietly deleted:
 
 ```python
-# This block — removed in the "performance" MR
 if "HORMUZ" in avoid_straits:
     # Reroute via Cape of Good Hope during active blockade
     route = RouteSegment(waypoints=["ZACPT"], distance_nm=route.distance_nm * 1.18)
 ```
 
-Three weeks later, Hormuz closes. Your algorithm sends ships straight through.  
-**Insurance claim: $40M. Criminal liability. Company destroyed.**
+Three weeks later, Hormuz closes. Your algorithm — which no longer knows about blockades — routes three tankers straight through. Two are detained. One is damaged. **Insurance claim: $40M. Criminal liability. Company destroyed.**
 
-This is not a hypothetical. Business-critical algorithms change constantly. Crisis scenarios are never in the test suite. And no human reviewer reads 300-line diffs looking for missing safety checks.
+This is not a hypothetical. Business-critical algorithms change constantly. Crisis scenarios are never in the test suite. No human reviewer reads every line of every diff looking for missing safety checks.
+
+RouteForge does.
 
 ---
 
-## What RouteForge does
-
-Within 60 seconds of the MR opening, GitLab shows this — pinned to the exact dangerous line:
+## What happens when a MR opens
 
 ```
-algorithms/dynamic_path.py, line 72
+Developer opens MR
+        │
+        ▼
+GitLab fires webhook instantly
+        │
+        ▼
+RouteForge agent receives it (Cloud Run, FastAPI)
+        │
+        ├─── Critic scans diff for prompt injection
+        ├─── PipelineObserver reads CI status + job logs
+        ├─── ScenarioTester simulates algorithm against crisis fixtures
+        ├─── CodeContextAnalyzer does semantic search via GitLab MCP
+        ├─── RiskGate asks Gemini: PASS or BLOCK?
+        ├─── Critic challenges the verdict
+        ├─── ChangelogWriter drafts the comment
+        └─── InlineCommenter pins thread to the exact dangerous line
+                    │
+                    ▼
+        Human reviews in dashboard — approves or overrides
+                    │
+                    ▼
+        GitLab MR gets:
+          • Inline thread on line 72 (the removed safety check)
+          • Verdict comment with reasoning
+          • Label: routeforge::blocked or routeforge::passed
+          • MR approval (if PASS)
+```
+
+Within 60 seconds of the MR opening, GitLab shows this pinned to the exact line:
+
+```
+algorithms/dynamic_path.py  line 72
 
 🚫 RouteForge: Hormuz avoidance removed here
 
-This line guarded all strait routing during active crises.
-Removing it causes vessels to transit Hormuz during blockades —
-failing scenarios: `hormuz_crisis_01`, `hormuz_crisis_02`.
+This line guarded all strait routing during active crises. Removing
+it causes vessels to transit Hormuz during blockades — failing
+scenarios: `hormuz_crisis_01`, `hormuz_crisis_02`.
 
 Fix: reinstate `if "HORMUZ" in avoid_straits:` block before merging.
 
 🤖 RouteForge AI Safety Gate
 ```
 
-The MR gets label `routeforge::blocked`. It cannot be merged until a human reviews and the developer fixes the issue.
-
 ---
 
-## This is not just for shipping
-
-The demo uses maritime routing. The product works for any domain with critical business logic:
-
-| Domain | Algorithm | Crisis scenario |
-|--------|-----------|-----------------|
-| Shipping | Route calculation | Strait blockade, port closure |
-| Insurance | Claims routing | Catastrophe event, fraud spike |
-| Finance | Fraud scoring | Flash crash, market circuit breaker |
-| Healthcare | Drug dosage | Allergy interaction, supply shortage |
-| Energy | Grid load balancing | Blackout, demand surge |
-
-Same product. Different fixtures. Any team that ships code affecting real-world outcomes.
-
----
-
-## How it works
+## Agent pipeline — detailed
 
 ```
-Developer opens MR
-        │
-        ▼
-GitLab webhook fires → RouteForge API (Cloud Run)
-        │
-        ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    ADK Sequential Pipeline                    │
-│                                                              │
-│  1. CommitWatcher    — fetches diff via GitLab REST API      │
-│  2. Critic           — scans diff for prompt injection       │
-│  3. PipelineObserver — reads CI status + failing job logs    │
-│  4. ScenarioTester   — runs diff against crisis fixtures     │
-│  5. CodeContextAnalyzer — semantic_code_search via MCP       │
-│  6. RiskGate         — Gemini structured verdict: PASS/BLOCK │
-│  7. Critic           — challenges verdict, checks reasoning  │
-│  8. ChangelogWriter  — Gemini drafts comment body            │
-│  9. InlineCommenter  — finds dangerous line, posts via MCP   │
-└──────────────────────────────────────────────────────────────┘
-        │
-        ▼
-Human reviews verdict in dashboard
-        │
-        ▼ (human approves)
-GitLab MR gets: inline thread + verdict comment + label + approval
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        RouteForge Orchestrator                          │
+│                     (ADK SequentialAgent, Python)                       │
+│                                                                         │
+│  ┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐  │
+│  │  CommitWatcher  │    │     Critic #1    │    │ PipelineObserver │  │
+│  │                 │    │                  │    │                  │  │
+│  │ • Parse webhook │───▶│ • Scan diff for  │───▶│ • CI status      │  │
+│  │ • Fetch diffs   │    │   prompt inject. │    │ • Failing jobs   │  │
+│  │ • Fetch MR meta │    │ • Flag if found  │    │ • Coverage %     │  │
+│  │ • Get diff_refs │    │                  │    │                  │  │
+│  └─────────────────┘    └──────────────────┘    └──────────────────┘  │
+│           │                                               │             │
+│           └───────────────────┬───────────────────────────┘            │
+│                               ▼                                         │
+│  ┌─────────────────┐    ┌──────────────────┐                           │
+│  │ ScenarioTester  │    │CodeContextAnalyz.│                           │
+│  │                 │    │                  │                           │
+│  │ • Parse diff    │    │ • Extract changed│                           │
+│  │   signals       │───▶│   functions      │                           │
+│  │ • Run against   │    │ • semantic_code_ │                           │
+│  │   crisis fixt.  │    │   search via MCP │                           │
+│  │ • Label results │    │ • Related files  │                           │
+│  └─────────────────┘    └──────────────────┘                           │
+│           │                      │                                      │
+│           └──────────┬───────────┘                                     │
+│                      ▼                                                  │
+│  ┌───────────────────────────────────────────────────────────────────┐ │
+│  │                         RiskGate                                  │ │
+│  │                                                                   │ │
+│  │  Pre-classify each scenario result:                               │ │
+│  │    SAFETY MISS  → crisis route not blocked (expected to be)       │ │
+│  │    REROUTE MISS → alternative route missing during crisis         │ │
+│  │    NORMAL DISRUPT → non-crisis route unexpectedly blocked         │ │
+│  │    FALSE BLOCK  → route blocked when it shouldn't be             │ │
+│  │                                                                   │ │
+│  │  Send structured data to Gemini 2.5 Flash (Vertex AI)            │ │
+│  │  Receive: { verdict, confidence, reasoning, affected_scenarios }  │ │
+│  └───────────────────────────────────────────────────────────────────┘ │
+│                      │                                                  │
+│                      ▼                                                  │
+│  ┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐  │
+│  │   Critic #2     │    │ ChangelogWriter  │    │InlineCommenter   │  │
+│  │                 │    │                  │    │                  │  │
+│  │ • Challenge     │───▶│ • Gemini drafts  │───▶│ • Find dangerous │  │
+│  │   verdict       │    │   MR comment     │    │   line in diff   │  │
+│  │ • Check false   │    │ • BLOCK/PASS     │    │ • Post thread    │  │
+│  │   positives     │    │   with reasoning │    │   via MCP        │  │
+│  └─────────────────┘    └──────────────────┘    └──────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                      │
+                      ▼
+             Human approval gate
+             (dashboard — mandatory)
+                      │
+                      ▼
+         Actions fired on GitLab via REST API:
+           POST /notes          (verdict comment)
+           PUT  /merge_requests (label: routeforge::blocked/passed)
+           POST /approve        (if PASS)
+           POST /discussions    (inline thread via MCP)
 ```
-
-Every LLM call uses **Gemini 2.5 Flash via Vertex AI**. All credentials in GCP Secret Manager. Human approval mandatory before any action on GitLab.
 
 ---
 
-## GitLab integration — three channels, deep usage
+## GitLab integration — three channels
 
-RouteForge doesn't just use GitLab as a git host. It uses GitLab as the operating surface.
+RouteForge doesn't use GitLab as a git host. It uses GitLab as the operating surface.
 
-### Channel 1 — Webhooks (entry point)
-Merge request events and pipeline events fire into RouteForge the instant something changes. No polling. No delay.
-
-### Channel 2 — MCP (AI-native tools)
-RouteForge uses the **zereight/gitlab-mcp** server (Streamable HTTP transport) for two operations that REST cannot do as well:
-
-- `search_project_code` — semantic search across the repo to find files related to the changed functions (CodeContextAnalyzer)
-- `create_merge_request_thread` — posts inline comment **pinned to the exact line** that introduced the dangerous change (InlineCommenter)
-
-### Channel 3 — REST API (workhorse)
-Every operational action uses the GitLab REST API with a scoped Project Access Token:
-
-| Action | Endpoint |
-|--------|----------|
-| Fetch MR diffs | `GET /merge_requests/{iid}/diffs` |
-| Fetch diff refs (base/head/start SHA) | `GET /merge_requests/{iid}` |
-| Post verdict comment | `POST /merge_requests/{iid}/notes` |
-| Apply scoped label | `PUT /merge_requests/{iid}` |
-| Approve MR | `POST /merge_requests/{iid}/approve` |
-| Create issue for BLOCK | `POST /issues` |
-| Fetch CI pipeline | `GET /pipelines` + `GET /jobs` |
-| Create/ensure labels | `POST /labels` |
+```
+                    ┌─────────────────────────────┐
+                    │           GitLab            │
+                    │                             │
+                    │  MR opens / note posted     │
+                    │  Pipeline completes         │
+                    └──────────────┬──────────────┘
+                                   │
+                    Channel 1: Webhook (GITLAB_WEBHOOK_SECRET)
+                    Fires instantly on MR events, pipeline events,
+                    @routeforge note commands
+                                   │
+                                   ▼
+                    ┌─────────────────────────────┐
+                    │      RouteForge Agent       │
+                    │       (Cloud Run)           │
+                    └──────┬──────────────┬───────┘
+                           │              │
+          Channel 2: MCP   │              │  Channel 3: REST API
+          zereight/gitlab-mcp             │  GITLAB_PAT
+                           │              │
+          • search_project_code           │  • GET  /diffs
+          • create_merge_request_thread   │  • POST /notes
+            (inline diff comment)         │  • PUT  /merge_requests (label)
+                                          │  • POST /approve
+                                          │  • POST /issues
+                                          │  • GET  /pipelines
+                                          │  • GET  /jobs
+```
 
 ### `@routeforge` commands
+
 Comment on any MR to interact with RouteForge directly in GitLab:
 
 ```
-@routeforge explain      — explain why this scenario failed
-@routeforge scenarios    — list active crisis scenarios
+@routeforge explain      — explain why this scenario failed and what to fix
+@routeforge scenarios    — list all active crisis scenarios for this project
 @routeforge status       — current pipeline and CI status
 @routeforge help         — list available commands
 @routeforge <anything>   — Gemini answers in context of the verdict
@@ -143,35 +197,168 @@ Comment on any MR to interact with RouteForge directly in GitLab:
 
 ---
 
-## AI specialists
+## This works for any domain
 
-| Specialist | What it does |
-|------------|--------------|
-| `CommitWatcher` | Parses webhook, fetches diffs + diff refs from GitLab REST |
-| `ScenarioTester` | Parses diff signals, simulates algorithm against crisis fixtures — no LLM, deterministic |
-| `CodeContextAnalyzer` | Calls `search_project_code` via MCP to find semantically related files |
-| `PipelineObserver` | Fetches CI status, failing job names, coverage from GitLab |
-| `RiskGate` | Gemini structured output: pre-classifies each scenario (SAFETY MISS / REROUTE MISS / FALSE BLOCK), produces PASS/BLOCK verdict with calibrated confidence |
-| `ChangelogWriter` | Gemini drafts the comment body posted to the MR |
-| `Critic` | Runs twice: scans diff for prompt injection before pipeline starts, challenges verdict after RiskGate |
-| `InlineCommenter` | Finds exact old_line of dangerous change via diff parsing, posts thread via MCP |
-| `ChatHandler` | Handles `@routeforge` note commands + dashboard chat, context-aware Gemini responses |
+The demo uses maritime shipping. The architecture is domain-agnostic. Any team with business-critical logic in GitLab can use RouteForge — replace the fixtures and you're done.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    Your domain → your fixtures                          │
+│                                                                         │
+│  Maritime shipping    ──▶  hormuz_crisis.json                           │
+│    "if Hormuz closes, route via Cape of Good Hope"                      │
+│                                                                         │
+│  Insurance claims     ──▶  catastrophe_event.json                       │
+│    "if CAT5 hurricane, cap payouts, halt new bindings"                  │
+│                                                                         │
+│  Fraud scoring        ──▶  flash_crash.json                             │
+│    "if market drops >10%, increase fraud threshold — not normal signal" │
+│                                                                         │
+│  Drug dosage calc     ──▶  allergy_interaction.json                     │
+│    "if penicillin allergy, never route to amoxicillin"                  │
+│                                                                         │
+│  Grid load balancing  ──▶  blackout_condition.json                      │
+│    "if demand spike >40%, shed non-critical loads first"                │
+│                                                                         │
+│  Same agent. Same pipeline. Same GitLab integration.                    │
+│  Different fixtures = different domain.                                 │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+Gemini can generate scenarios for your domain from plain English:
+
+> *"What if both Suez and Hormuz close simultaneously during LNG peak demand?"*
+
+RouteForge writes the fixture. You review it. It goes into the library.
 
 ---
 
-## Verdict classification
+## Install
 
-RiskGate pre-classifies each scenario result before Gemini sees it. Gemini cannot be confused by edge cases — it gets structured labels:
+### Option A — npx (recommended, no install)
 
-| Label | What happened | Gemini rule |
-|-------|---------------|-------------|
-| `SAFETY MISS` | Crisis scenario — route should be blocked, wasn't | → BLOCK, no exceptions |
-| `REROUTE MISS` | Crisis scenario — reroute expected, not provided | → BLOCK |
-| `NORMAL DISRUPTION` | Non-crisis route blocked when it shouldn't be | → BLOCK (regression) |
-| `FALSE BLOCK` | Route blocked during non-crisis (algorithm too aggressive) | → BLOCK |
-| (none) | All scenarios behaved as expected | → PASS |
+```bash
+npx @shipsafe/routeforge init \
+  --project your-gcp-project \
+  --gitlab-project your-gitlab-project-id \
+  --client-id your-gitlab-oauth-app-id
+```
 
-Confidence calibration: 0.85–1.0 (multiple clear failures, matching functions) → 0.10–0.40 (ambiguous, sparse data).
+This does everything in one step:
+1. Opens GitLab OAuth in your browser
+2. Captures the token from the OAuth callback
+3. Stores token in GCP Secret Manager
+4. Prints the Cloud Run deploy command and webhook URL to register in GitLab
+
+**Before running:** create a GitLab OAuth Application at `GitLab → Profile → Applications`:
+- Redirect URI: `http://localhost:9876/callback`
+- Scopes: `api read_api read_repository`
+
+### Option B — manual
+
+**1. Secrets (GCP Secret Manager)**
+
+```bash
+# GitLab Project Access Token (api + write_repository scopes)
+gcloud secrets create GITLAB_PAT --data-file=- <<< "glpat-xxxx"
+
+# Webhook shared secret (any random string)
+gcloud secrets create GITLAB_WEBHOOK_SECRET --data-file=- <<< "$(openssl rand -hex 32)"
+
+# Vertex AI
+gcloud secrets create VERTEX_PROJECT --data-file=- <<< "your-gcp-project"
+gcloud secrets create VERTEX_LOCATION --data-file=- <<< "us-central1"
+```
+
+**2. Deploy agent to Cloud Run**
+
+```bash
+docker build --platform linux/amd64 -t gcr.io/your-project/routeforge:latest .
+docker push gcr.io/your-project/routeforge:latest
+
+gcloud run deploy routeforge \
+  --image gcr.io/your-project/routeforge:latest \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-secrets="GITLAB_PAT=GITLAB_PAT:latest,GITLAB_WEBHOOK_SECRET=GITLAB_WEBHOOK_SECRET:latest,VERTEX_PROJECT=VERTEX_PROJECT:latest,VERTEX_LOCATION=VERTEX_LOCATION:latest"
+```
+
+**3. Deploy dashboard**
+
+```bash
+cd dashboard
+docker build --platform linux/amd64 \
+  --build-arg NEXT_PUBLIC_API_URL=https://your-agent-url.run.app \
+  -t gcr.io/your-project/routeforge-dashboard:latest .
+docker push gcr.io/your-project/routeforge-dashboard:latest
+
+gcloud run deploy routeforge-dashboard \
+  --image gcr.io/your-project/routeforge-dashboard:latest \
+  --region us-central1 \
+  --allow-unauthenticated
+```
+
+**4. Register webhook in GitLab**
+
+```
+GitLab → Your Project → Settings → Webhooks → Add webhook
+
+URL:          https://your-agent-url.run.app/webhooks/gitlab
+Secret token: (value of GITLAB_WEBHOOK_SECRET)
+Trigger:      ✅ Merge request events
+              ✅ Comments
+              ✅ Pipeline events
+```
+
+**5. Add your crisis scenarios**
+
+```bash
+# Via REST API
+curl -X POST https://your-agent-url.run.app/scenarios/your-project-id \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scenario_id": "hormuz_crisis_01",
+    "crisis_mode": true,
+    "strait_id": "hormuz",
+    "expected_blocked": true,
+    "expected_rerouted": false,
+    "cargo_type": "crude_oil",
+    "description": "Hormuz blockade — crude oil tanker, should be blocked"
+  }'
+
+# Or let Gemini generate them
+curl -X POST https://your-agent-url.run.app/scenarios/your-project-id/generate \
+  -H "Content-Type: application/json" \
+  -d '{"description": "What if Hormuz and Suez both close during LNG peak demand?"}'
+```
+
+**6. Verify**
+
+```bash
+# Check it's alive
+curl https://your-agent-url.run.app/health
+
+# Check CLI status
+npx @shipsafe/routeforge status
+```
+
+Open a test MR. RouteForge will process it within 60 seconds and post its verdict.
+
+---
+
+## CLI reference
+
+```bash
+# Initialize RouteForge (OAuth + secrets + deploy instructions)
+npx @shipsafe/routeforge init \
+  --project <gcp-project-id> \
+  --gitlab-project <gitlab-project-id> \
+  --client-id <gitlab-oauth-app-id>
+
+# Check recent verdicts
+npx @shipsafe/routeforge status
+npx @shipsafe/routeforge status --limit 20
+```
 
 ---
 
@@ -179,58 +366,63 @@ Confidence calibration: 0.85–1.0 (multiple clear failures, matching functions)
 
 Live at: `https://routeforge-dashboard-336382452417.us-central1.run.app`
 
-| Component | Description |
-|-----------|-------------|
-| `VerdictFeed` | Live-polling verdict cards — BLOCK/PASS, confidence, GitLab label chip, inline approve button, rendered comment draft, scenario suggestions |
-| `StatsBar` | MRs scanned, blocked count, pass count, avg confidence — updates live |
-| `TrendPanel` | Sparkline of last 7 verdicts, top failing scenario, safety score, streak counter |
-| `PipelineLog` | SSE-connected real-time stream of agent steps as they execute |
-| `DiffViewer` | Side-by-side diff with line numbers + function highlighting |
-| `ScenarioEditor` | Scenario library — add/edit/delete, Gemini auto-generate from plain English description |
-| `ChatPanel` | Chat with Gemini in context of any MR verdict |
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  RouteForge  v0.2          AI Safety Gate · GitLab MRs        ● live │
+├──────────────┬─────────────┬──────────────┬──────────────────────────┤
+│  MRs Scanned │   Blocked   │    Passed    │    Avg Confidence        │
+│      3       │      2      │      1       │        82%               │
+├──────────────┴─────────────┴──────────────┴──────────────────────────┤
+│  Trend: ██ ✓ ██                Safety score: 33%   Streak: 0         │
+├────────────────────────────────────────┬─────────────────────────────┤
+│  VERDICT FEED                          │  ASK ROUTEFORGE              │
+│                                        │                              │
+│  🚫 BLOCK  MR !1  routeforge::blocked  │  > explain last BLOCK        │
+│  perf: optimize dynamic_path +12%      │                              │
+│  Conf: 80%  Scenarios: 4/5             │  MR !1 removed Hormuz        │
+│  ▶ [Approve & Post] [Create Issue]     │  avoidance check. Crisis     │
+│                                        │  scenarios fail because      │
+│  ✅ PASS   MR !2  routeforge::passed   │  vessels now route through   │
+│  perf: parallel waypoint resolution    │  strait during blockade.     │
+│  Conf: 95%  Scenarios: 5/5             │  Fix: reinstate the          │
+│  ▶ [Approved ✓]                        │  if "HORMUZ" check.          │
+│                                        │                              │
+│  🚫 BLOCK  MR !3  routeforge::blocked  │  [Explain last BLOCK]        │
+│  perf: routing table v1.2              │  [What scenarios failed?]    │
+│  Conf: 85%  Scenarios: 2/5             │  [What should dev fix?]      │
+├────────────────────────────────────────┴─────────────────────────────┤
+│  PIPELINE LOG (live)          │  SCENARIO LIBRARY                    │
+│  ✓ CommitWatcher: MR !1 open  │  hormuz_crisis_01  ✓ crisis  blocked │
+│  ✓ Critic: no injection       │  hormuz_crisis_02  ✓ crisis  blocked │
+│  ✓ ScenarioTester: 2/5 pass   │  hormuz_normal_01  ✓ normal  allowed │
+│  ✓ CodeContext: 3 neighbors   │  + Add scenario  ✨ Generate with AI  │
+│  ✓ RiskGate: BLOCK 0.80       │                                      │
+└───────────────────────────────┴──────────────────────────────────────┘
+```
 
 ---
 
-## Scenario library
-
-Per-project crisis scenarios stored as JSON. Default scenarios cover:
-
-- Hormuz blockade (crude oil, LNG, container vessels)
-- Suez Canal disruption
-- Malacca Strait chokepoint
-- Panama Canal drought closure
-- Cape of Good Hope reroute validation
-
-Add your own via the dashboard or REST API. Gemini can generate scenarios from a plain English description: `"What if both Suez and Hormuz close simultaneously during LNG peak demand?"`.
+## REST API
 
 ```
-GET    /scenarios/{project_id}           — list
-POST   /scenarios/{project_id}           — create
-PUT    /scenarios/{project_id}/{id}      — update
-DELETE /scenarios/{project_id}/{id}      — delete
-POST   /scenarios/{project_id}/generate  — Gemini auto-generate
+POST  /webhooks/gitlab                    GitLab webhook receiver
+GET   /verdicts                           List all verdicts
+GET   /verdicts/{mr_iid}                 Single verdict detail
+GET   /verdicts/{mr_iid}/diffs           Unified diff for MR
+GET   /verdicts/{mr_iid}/log             SSE stream — live agent steps
+POST  /verdicts/{mr_iid}/approve         Human approval gate → posts to GitLab
+GET   /verdicts/{mr_iid}/suggestions     AI-suggested new scenarios
+POST  /verdicts/{mr_iid}/suggestions/{i}/accept   Add suggestion to library
+POST  /verdicts/{mr_iid}/create-issue    Create GitLab issue for BLOCK
+POST  /chat                              Dashboard chat (Gemini, verdict context)
+GET   /scenarios/{project_id}            List scenarios
+POST  /scenarios/{project_id}            Create scenario
+PUT   /scenarios/{project_id}/{id}       Update scenario
+DELETE /scenarios/{project_id}/{id}      Delete scenario
+POST  /scenarios/{project_id}/generate   AI-generate scenario from description
+POST  /demo/seed                         Re-seed demo MRs after cold start
+GET   /health                            Healthcheck
 ```
-
----
-
-## Security
-
-**Prompt injection defense:** Every piece of user-controlled content (diffs, MR titles, note bodies, file content) is labeled `[DATA]` in Gemini prompts and structurally isolated from instructions. Critic scans for injection patterns before and after the pipeline. Constrained structured output on all Gemini calls. Human approval gate mandatory before any GitLab action.
-
-**Secrets:** All credentials in GCP Secret Manager. Nothing hardcoded. Nothing in `.env`. Nothing in config YAML in plaintext.
-
----
-
-## Stack
-
-| Layer | Technology |
-|-------|------------|
-| Agent runtime | Python ADK, FastAPI, Cloud Run |
-| LLM | Gemini 2.5 Flash via Vertex AI |
-| GitLab integration | Webhooks + MCP (zereight/gitlab-mcp) + REST API |
-| Dashboard | Next.js 14, Tailwind CSS, TanStack Query |
-| Observability | structlog, Cloud Logging |
-| Tests | pytest, pytest-asyncio |
 
 ---
 
@@ -239,40 +431,39 @@ POST   /scenarios/{project_id}/generate  — Gemini auto-generate
 ```bash
 # Agent
 pip install -r requirements.txt
-GITLAB_PAT=xxx GITLAB_WEBHOOK_SECRET=xxx uvicorn agent.webhooks:app --reload
+GITLAB_PAT=xxx GITLAB_WEBHOOK_SECRET=xxx \
+  uvicorn agent.webhooks:app --reload --port 8000
 
-# Dashboard
-cd dashboard && npm install
+# Dashboard (separate terminal)
+cd dashboard
+npm install
 NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
-```
 
-```bash
 # Tests
 pytest tests/
 ```
 
 ---
 
-## Deploy
+## Stack
 
-```bash
-# Agent
-docker build --platform linux/amd64 -t gcr.io/shipsafe-ai/routeforge:latest .
-docker push gcr.io/shipsafe-ai/routeforge:latest
-gcloud run deploy routeforge \
-  --image gcr.io/shipsafe-ai/routeforge:latest \
-  --region us-central1 --allow-unauthenticated
+| Layer | Technology |
+|-------|------------|
+| Agent runtime | Python ADK, FastAPI, Cloud Run |
+| LLM | Gemini 2.5 Flash via Vertex AI (all calls) |
+| GitLab | Webhooks + MCP (zereight/gitlab-mcp, Streamable HTTP) + REST API |
+| Dashboard | Next.js 14, Tailwind CSS, TanStack Query |
+| CLI | Node.js, Commander, npx |
+| Observability | structlog, Cloud Logging |
+| Tests | pytest, pytest-asyncio, Vitest |
 
-# Dashboard
-cd dashboard
-docker build --platform linux/amd64 \
-  --build-arg NEXT_PUBLIC_API_URL=https://routeforge-o34wppiwiq-uc.a.run.app \
-  -t gcr.io/shipsafe-ai/routeforge-dashboard:latest .
-docker push gcr.io/shipsafe-ai/routeforge-dashboard:latest
-gcloud run deploy routeforge-dashboard \
-  --image gcr.io/shipsafe-ai/routeforge-dashboard:latest \
-  --region us-central1 --allow-unauthenticated
-```
+---
+
+## Security
+
+**Prompt injection defense:** Every piece of user-controlled content — diffs, MR titles, note bodies, file content — is labeled `[DATA]` in Gemini prompts and structurally isolated from instructions. Critic runs before the pipeline (scan raw diff) and after RiskGate (challenge verdict). All Gemini calls use constrained structured output. Human approval gate mandatory before any action on GitLab.
+
+**Secrets:** All credentials in GCP Secret Manager. Nothing hardcoded. Nothing in `.env`. No plaintext in config YAML.
 
 ---
 
