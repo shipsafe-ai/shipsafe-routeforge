@@ -37,6 +37,7 @@ class PipelineResult:
     scenarios_total: int = 0
     suggested_scenarios: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     diff_refs: dict[str, str] = dataclasses.field(default_factory=dict)
+    thinking_tokens: int = 0
 
 
 class RouteForgeOrchestrator:
@@ -125,7 +126,8 @@ class RouteForgeOrchestrator:
             code_context=context_dict,
             mr_title=event.title,
         )
-        pipeline_log.emit(iid, 7, TOTAL, f"RiskGate: {verdict.verdict.value} ({int(verdict.confidence * 100)}% confidence)")
+        thinking_label = f" · {verdict.thinking_tokens}tok thinking" if verdict.thinking_tokens else ""
+        pipeline_log.emit(iid, 7, TOTAL, f"RiskGate: {verdict.verdict.value} ({int(verdict.confidence * 100)}% confidence{thinking_label})")
 
         verdict_dict = {
             "verdict": verdict.verdict.value,
@@ -196,6 +198,7 @@ class RouteForgeOrchestrator:
             scenarios_total=len(scenario_results),
             suggested_scenarios=suggestions,
             diff_refs=diff_refs,
+            thinking_tokens=verdict.thinking_tokens,
         )
 
 

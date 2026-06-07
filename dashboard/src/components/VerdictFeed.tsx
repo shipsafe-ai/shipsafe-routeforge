@@ -88,6 +88,7 @@ interface Verdict {
   scenarios_passed?: number;
   scenarios_total?: number;
   suggested_scenarios?: SuggestedScenario[];
+  thinking_tokens?: number;
 }
 
 async function fetchVerdicts(): Promise<Verdict[]> {
@@ -252,6 +253,18 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
             {card.mr_approved && (
               <span className="inline-flex items-center gap-1 text-[10px] font-mono text-green-500 border border-green-900/40 bg-green-950/20 px-1.5 py-px rounded">
                 <CheckCircle2 size={8} /> approved
+              </span>
+            )}
+            {/* Gemini thinking tokens badge */}
+            {(card.thinking_tokens ?? 0) > 0 && (
+              <span
+                title={`Gemini used ${card.thinking_tokens!.toLocaleString()} thinking tokens to reason before deciding ${card.verdict}`}
+                className="inline-flex items-center gap-1 text-[10px] font-mono text-purple-400 border border-purple-900/40 bg-purple-950/20 px-1.5 py-px rounded cursor-help"
+              >
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a8 8 0 0 1 8 8c0 3-1.5 5.5-4 7v3H8v-3C5.5 15.5 4 13 4 10a8 8 0 0 1 8-8z"/><path d="M9 21h6"/></svg>
+                {card.thinking_tokens! >= 1000
+                  ? `${(card.thinking_tokens! / 1000).toFixed(1)}k`
+                  : card.thinking_tokens} thinking
               </span>
             )}
             <span className="text-[11px] text-gray-600">{ts}</span>

@@ -39,6 +39,7 @@ def _verdict_entry(mr_iid: int, verdict: str = "PASS", **extra) -> dict:
         "suggested_scenarios": [],
         "issue_url": None,
         "work_item_url": None,
+        "thinking_tokens": 0,
     }
     base.update(extra)
     return base

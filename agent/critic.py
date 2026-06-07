@@ -8,6 +8,10 @@ from typing import Any
 
 from agent.gemini_client import generate_json
 
+# Critic reasons independently against the verdict — 4096 tokens is enough for
+# an adversarial challenge without the full decision depth of RiskGate.
+_THINKING_BUDGET = 4096
+
 
 # Injection patterns: instruction override attempts embedded in user-controlled content
 _INJECTION_PATTERNS = [
@@ -81,7 +85,7 @@ class Critic:
         response_schema: dict[str, Any],
     ) -> CriticReport:
         prompt = _build_critic_prompt(verdict, scenario_results)
-        raw = json.loads(await generate_json(prompt, response_schema))
+        raw = json.loads(await generate_json(prompt, response_schema, thinking_budget=_THINKING_BUDGET))
         return CriticReport(
             injection_detected=False,
             injection_indicators=[],

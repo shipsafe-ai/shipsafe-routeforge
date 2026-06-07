@@ -795,6 +795,8 @@ def _store_verdict(result: PipelineResult, payload: dict[str, Any]) -> None:
             "failing_jobs": ps.failing_jobs if ps else [],
             "coverage": ps.coverage if ps else None,
         },
+        # Gemini thinking layer metadata
+        "thinking_tokens": result.thinking_tokens,
         # Stored for inline comments — stripped from list API
         "diffs": result.diffs,
         "diff_refs": result.diff_refs,

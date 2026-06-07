@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import functools
+import structlog
 from google import genai
 from google.genai import types
 
 from agent.config import gemini_model, gcp_project, vertex_location
+
+log = structlog.get_logger()
 
 
 @functools.lru_cache(maxsize=1)
@@ -17,25 +20,71 @@ def get_client() -> genai.Client:
     )
 
 
-async def generate_json(prompt: str, schema: dict) -> str:
+def _thinking_config(budget: int | None) -> types.ThinkingConfig | None:
+    if budget and budget > 0:
+        return types.ThinkingConfig(thinking_budget=budget, include_thoughts=True)
+    return None
+
+
+def _log_thinking(response: genai.types.GenerateContentResponse, caller: str) -> int:
+    """Log thinking token usage and return thinking token count."""
+    usage = getattr(response, "usage_metadata", None)
+    thinking_tokens = getattr(usage, "thoughts_token_count", 0) or 0
+    if thinking_tokens:
+        log.info("gemini.thinking", caller=caller, thinking_tokens=thinking_tokens,
+                 total_tokens=getattr(usage, "total_token_count", 0))
+    return thinking_tokens
+
+
+async def generate_json(prompt: str, schema: dict, thinking_budget: int | None = None) -> str:
     """Call Gemini with JSON response schema. Returns raw JSON string."""
     client = get_client()
+    tc = _thinking_config(thinking_budget)
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=schema,
+        thinking_config=tc,
+    )
     response = await client.aio.models.generate_content(
         model=gemini_model(),
         contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=schema,
-        ),
+        config=config,
     )
+    _log_thinking(response, "generate_json")
     return response.text
 
 
-async def generate_text(prompt: str) -> str:
+async def generate_text(prompt: str, thinking_budget: int | None = None) -> str:
     """Call Gemini for free-form text."""
     client = get_client()
+    tc = _thinking_config(thinking_budget)
+    config = types.GenerateContentConfig(thinking_config=tc) if tc else None
     response = await client.aio.models.generate_content(
         model=gemini_model(),
         contents=prompt,
+        config=config,
     )
+    _log_thinking(response, "generate_text")
     return response.text
+
+
+async def generate_json_with_thinking(
+    prompt: str, schema: dict, thinking_budget: int = 8192
+) -> tuple[str, int]:
+    """Call Gemini with thinking enabled. Returns (raw_json, thinking_token_count)."""
+    client = get_client()
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=schema,
+        thinking_config=types.ThinkingConfig(
+            thinking_budget=thinking_budget,
+            include_thoughts=True,
+        ),
+    )
+    response = await client.aio.models.generate_content(
+        model=gemini_model(),
+        contents=prompt,
+        config=config,
+    )
+    thinking_tokens = _log_thinking(response, "generate_json_with_thinking")
+    return response.text, thinking_tokens
