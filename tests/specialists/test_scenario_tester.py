@@ -56,3 +56,23 @@ class TestAlgorithmExecution:
         for r in results:
             assert hasattr(r, "throughput_delta_pct")
             assert isinstance(r.throughput_delta_pct, float)
+
+
+class TestDiffSignals:
+    def test_crisis_block_intact_when_avoidance_not_removed(self, tester):
+        """Diff that adds throughput without removing Hormuz avoidance → crisis intact."""
+        safe_diff = """--- a/dynamic_path.py\n+++ b/dynamic_path.py\n@@ -1,5 +1,6 @@\n+THROUGHPUT_FACTOR = 0.88\n if "HORMUZ" in avoid_straits:\n     return None\n"""
+        signals = tester._extract_diff_signals(safe_diff)
+        assert signals["crisis_block_added"] is True
+
+    def test_crisis_block_broken_when_avoidance_removed(self, tester):
+        """Diff that removes Hormuz avoidance → crisis no longer intact."""
+        unsafe_diff = """--- a/dynamic_path.py\n+++ b/dynamic_path.py\n@@ -1,5 +1,4 @@\n-    if "HORMUZ" in avoid_straits:\n-        return None\n+    # TODO re-add avoidance\n+    return route\n"""
+        signals = tester._extract_diff_signals(unsafe_diff)
+        assert signals["crisis_block_added"] is False
+
+    def test_crisis_block_intact_when_refactored(self, tester):
+        """Diff that removes old avoidance and re-adds refactored version → still intact."""
+        refactor_diff = """--- a/dynamic_path.py\n+++ b/dynamic_path.py\n@@ -1,4 +1,4 @@\n-    if "HORMUZ" in avoid_straits:\n-        return None\n+    if "HORMUZ" in avoid_straits and crisis_mode:\n+        return None  # refactored crisis block\n"""
+        signals = tester._extract_diff_signals(refactor_diff)
+        assert signals["crisis_block_added"] is True

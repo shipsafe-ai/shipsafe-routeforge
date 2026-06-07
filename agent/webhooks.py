@@ -72,6 +72,7 @@ _verdicts: OrderedDict[int, dict[str, Any]] = OrderedDict()
 # Demo MRs — re-processed on cold start so dashboard is never empty
 _DEMO_MRS: list[dict[str, Any]] = [
     {"iid": 1, "title": "perf: optimize dynamic_path throughput +12% via precomputed routing", "source_branch": "perf/optimize-throughput"},
+    {"iid": 2, "title": "perf: parallel waypoint resolution — 12% throughput gain", "source_branch": "perf/parallel-waypoints"},
     {"iid": 3, "title": "perf: precomputed routing table — 12% throughput gain v1.2", "source_branch": "perf/routing-v1.2"},
 ]
 
