@@ -8,7 +8,13 @@ import { ModelSelector } from "@/components/ModelSelector";
 export default function Home() {
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100">
-      <header className="border-b border-[#1e1e26] px-6 py-3.5 flex items-center gap-4">
+      <header className="border-b border-[#1e1e26] px-6 py-3.5 flex items-center gap-4 overflow-visible relative z-10">
+        <a href="https://shipsafe-landing-o34wppiwiq-uc.a.run.app"
+           className="text-xs font-mono text-gray-600 hover:text-gray-400 transition-colors"
+           style={{ textDecoration: 'none' }}>
+          ← ShipSafe
+        </a>
+        <span className="text-[#1e1e26]">·</span>
         <div className="flex items-center gap-2.5">
           <span className="font-mono text-brand font-semibold text-base tracking-tight">RouteForge</span>
           <span className="text-[10px] text-gray-600 font-mono border border-[#1e1e26] rounded px-1.5 py-px">v0.2</span>

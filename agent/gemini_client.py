@@ -36,6 +36,17 @@ def _log_thinking(response: genai.types.GenerateContentResponse, caller: str) ->
     return thinking_tokens
 
 
+def _extract_thoughts(response: genai.types.GenerateContentResponse) -> str:
+    """Extract Gemini's chain-of-thought text (parts marked thought=True)."""
+    thoughts: list[str] = []
+    for cand in getattr(response, "candidates", []) or []:
+        content = getattr(cand, "content", None)
+        for part in (getattr(content, "parts", []) or []):
+            if getattr(part, "thought", False) and getattr(part, "text", ""):
+                thoughts.append(part.text)
+    return "\n\n".join(thoughts)
+
+
 async def generate_json(prompt: str, schema: dict, thinking_budget: int | None = None) -> str:
     """Call Gemini with JSON response schema. Returns raw JSON string."""
     client = get_client()
@@ -72,6 +83,14 @@ async def generate_json_with_thinking(
     prompt: str, schema: dict, thinking_budget: int = 8192
 ) -> tuple[str, int]:
     """Call Gemini with thinking enabled. Returns (raw_json, thinking_token_count)."""
+    raw, tokens, _thoughts = await generate_json_with_thoughts(prompt, schema, thinking_budget)
+    return raw, tokens
+
+
+async def generate_json_with_thoughts(
+    prompt: str, schema: dict, thinking_budget: int = 8192
+) -> tuple[str, int, str]:
+    """Call Gemini with thinking enabled. Returns (raw_json, thinking_token_count, thinking_text)."""
     client = get_client()
     config = types.GenerateContentConfig(
         response_mime_type="application/json",
@@ -86,5 +105,6 @@ async def generate_json_with_thinking(
         contents=prompt,
         config=config,
     )
-    thinking_tokens = _log_thinking(response, "generate_json_with_thinking")
-    return response.text, thinking_tokens
+    thinking_tokens = _log_thinking(response, "generate_json_with_thoughts")
+    thinking_text = _extract_thoughts(response)
+    return response.text, thinking_tokens, thinking_text

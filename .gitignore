@@ -232,3 +232,4 @@ terraform/.terraform.lock.hcl
 *.env
 .env.*
 secrets/
+CLAUDE.md

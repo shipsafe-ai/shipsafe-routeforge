@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from agent.ais_stream import get_deviations, register_scenario_callback, start_ais_feed
 from agent.config import get_secret, gemini_model, set_gemini_model, AVAILABLE_MODELS
 from agent.orchestrator import RouteForgeOrchestrator, PipelineResult
 from agent.specialists.chat_handler import ChatHandler
@@ -29,6 +30,8 @@ from agent import scenario_store
 log = structlog.get_logger()
 
 app = FastAPI(title="RouteForge", version="0.2.0")
+
+
 
 
 def _demo_payload(mr: dict[str, Any]) -> dict[str, Any]:
@@ -52,7 +55,20 @@ def _demo_payload(mr: dict[str, Any]) -> dict[str, Any]:
 
 @app.on_event("startup")
 async def _auto_seed() -> None:
-    """Auto-seed demo MRs on cold start so dashboard is never empty."""
+    """Auto-seed demo MRs + start AIS feed on cold start."""
+    import os
+    # Wire AIS deviation events → scenario library
+    async def _on_deviation(scenario: dict) -> None:
+        try:
+            scenario_store.upsert(scenario["name"], scenario)
+            log.info("ais_scenario_added", name=scenario["name"], deviation_nm=scenario.get("deviation_nm"))
+        except Exception:
+            pass
+    register_scenario_callback(_on_deviation)
+    ais_key = os.environ.get("AISSTREAM_API_KEY", "")
+    if ais_key:
+        asyncio.create_task(start_ais_feed(ais_key))
+    # Seed demo MRs
     await asyncio.sleep(3)
     for mr in _DEMO_MRS:
         asyncio.create_task(run_pipeline(_demo_payload(mr)))
@@ -892,8 +908,15 @@ def _store_verdict(result: PipelineResult, payload: dict[str, Any]) -> None:
             "failing_jobs": ps.failing_jobs if ps else [],
             "coverage": ps.coverage if ps else None,
         },
-        # Gemini thinking layer metadata
+        # Gemini thinking layer — token count + actual chain-of-thought text
         "thinking_tokens": result.thinking_tokens,
+        "thinking_text": result.thinking_text,
+        # Adversarial Critic — its reasoning (was computed but never surfaced)
+        "critic": {
+            "verdict_challenged": result.critic_report.verdict_challenged,
+            "challenge_reasoning": result.critic_report.challenge_reasoning,
+            "override_recommended": result.critic_report.override_recommended,
+        },
         # Stored for inline comments — stripped from list API
         "diffs": result.diffs,
         "diff_refs": result.diff_refs,
@@ -1008,3 +1031,14 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("agent.webhooks:app", host="0.0.0.0", port=8080, reload=False)
+
+
+@app.get("/ais")
+async def ais_deviations() -> dict:
+    """Real AIS vessel deviation events auto-generated as RouteForge scenarios."""
+    return {
+        "deviations": get_deviations(),
+        "count": len(get_deviations()),
+        "description": "Live AIS position reports: vessels deviating from expected Hormuz route → auto-scenario generation",
+        "source": "aisstream.io",
+    }

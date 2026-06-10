@@ -1,7 +1,7 @@
 {
-  "name": "@shipsafe/routeforge",
+  "name": "shipsafe-routeforge",
   "version": "0.1.0",
-  "description": "RouteForge CLI — init and manage your GitLab AI safety gate",
+  "description": "RouteForge CLI \u2014 init and manage your GitLab AI safety gate",
   "bin": {
     "routeforge": "./bin/routeforge.mjs"
   },

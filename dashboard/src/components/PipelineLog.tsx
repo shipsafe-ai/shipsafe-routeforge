@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal, CheckCircle2, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-o34wppiwiq-uc.a.run.app";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-336382452417.us-central1.run.app";
 
 interface LogEntry {
   step: number;

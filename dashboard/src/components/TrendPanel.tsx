@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-o34wppiwiq-uc.a.run.app";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-336382452417.us-central1.run.app";
 
 interface Verdict {
   verdict: "PASS" | "BLOCK";

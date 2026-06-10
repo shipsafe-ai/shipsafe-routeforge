@@ -18,6 +18,7 @@ const mono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "RouteForge",
   description: "AI Safety Gate for GitLab MRs",
+  icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

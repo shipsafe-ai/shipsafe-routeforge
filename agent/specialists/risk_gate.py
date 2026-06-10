@@ -6,7 +6,7 @@ import enum
 import json
 from typing import Any
 
-from agent.gemini_client import generate_json_with_thinking
+from agent.gemini_client import generate_json_with_thoughts
 
 # Thinking budget for RiskGate — the PASS/BLOCK decision warrants deep reasoning.
 # Gemini 2.5 Flash max thinking budget is 24576. 8192 balances depth vs latency.
@@ -25,6 +25,7 @@ class Verdict:
     reasoning: str
     affected_scenarios: list[str]
     thinking_tokens: int = 0
+    thinking_text: str = ""
 
 
 _VERDICT_SCHEMA = {
@@ -64,7 +65,7 @@ class RiskGate:
         response_schema: dict[str, Any],
     ) -> Verdict:
         prompt = _build_verdict_prompt(mr_title, scenario_results, code_context)
-        raw_json, thinking_tokens = await generate_json_with_thinking(
+        raw_json, thinking_tokens, thinking_text = await generate_json_with_thoughts(
             prompt, response_schema, thinking_budget=_THINKING_BUDGET
         )
         raw = json.loads(raw_json)
@@ -74,6 +75,7 @@ class RiskGate:
             reasoning=raw["reasoning"],
             affected_scenarios=raw.get("affected_scenarios", []),
             thinking_tokens=thinking_tokens,
+            thinking_text=thinking_text,
         )
 
 

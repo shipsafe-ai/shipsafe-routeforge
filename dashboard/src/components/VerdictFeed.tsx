@@ -45,7 +45,7 @@ function renderMarkdown(text: string): React.ReactNode[] {
   });
 }
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-o34wppiwiq-uc.a.run.app";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-336382452417.us-central1.run.app";
 
 type VerdictEnum = "PASS" | "BLOCK" | "PENDING";
 
@@ -89,6 +89,12 @@ interface Verdict {
   scenarios_total?: number;
   suggested_scenarios?: SuggestedScenario[];
   thinking_tokens?: number;
+  thinking_text?: string;
+  critic?: {
+    verdict_challenged: boolean;
+    challenge_reasoning: string;
+    override_recommended: boolean;
+  };
 }
 
 async function fetchVerdicts(): Promise<Verdict[]> {
@@ -370,7 +376,29 @@ function VerdictCard({ card, isNew }: { card: Verdict; isNew: boolean }) {
                   <div>
                     <SectionLabel>Reasoning</SectionLabel>
                     <p className="text-gray-300 text-sm leading-relaxed">{card.reasoning}</p>
+                    {card.thinking_text && (
+                      <details className="mt-2">
+                        <summary className="text-[11px] font-mono text-purple-400 cursor-pointer select-none hover:text-purple-300 uppercase tracking-wider">
+                          Gemini chain-of-thought
+                          {(card.thinking_tokens ?? 0) > 0 ? ` · ${card.thinking_tokens!.toLocaleString()} tokens` : ""}
+                        </summary>
+                        <pre className="mt-1.5 text-[11px] text-gray-400 bg-black/40 border border-gray-800 rounded p-2.5 whitespace-pre-wrap max-h-64 overflow-auto leading-relaxed">
+{card.thinking_text}
+                        </pre>
+                      </details>
+                    )}
                   </div>
+
+                  {/* Adversarial Critic — Gemini's challenge of the verdict */}
+                  {card.critic?.challenge_reasoning && (
+                    <div>
+                      <SectionLabel>
+                        Critic{card.critic.verdict_challenged ? " · challenged" : " · upheld"}
+                        {card.critic.override_recommended ? " · override recommended" : ""}
+                      </SectionLabel>
+                      <p className="text-gray-400 text-sm leading-relaxed">{card.critic.challenge_reasoning}</p>
+                    </div>
+                  )}
 
                   {/* Affected scenarios */}
                   {isBlock && card.affected_scenarios.length > 0 && (

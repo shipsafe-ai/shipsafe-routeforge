@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-agent-3u3bpco7sa-uc.a.run.app";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://routeforge-336382452417.us-central1.run.app";
 
 const MODEL_LABELS: Record<string, { label: string; hint: string }> = {
   "gemini-2.5-flash": { label: "Flash", hint: "Fast · Default · thinking up to 24k tokens" },
@@ -67,7 +67,7 @@ export function ModelSelector() {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1.5 z-20 w-56 rounded-lg border border-[#1e1e26] bg-gray-900 shadow-xl overflow-hidden">
+          <div className="absolute right-0 top-full mt-1.5 z-50 w-56 rounded-lg border border-[#1e1e26] bg-gray-900 shadow-xl overflow-hidden">
             {available.map((m) => {
               const mi = MODEL_LABELS[m] ?? { label: m, hint: "" };
               const active = m === current;

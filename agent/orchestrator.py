@@ -38,6 +38,7 @@ class PipelineResult:
     suggested_scenarios: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     diff_refs: dict[str, str] = dataclasses.field(default_factory=dict)
     thinking_tokens: int = 0
+    thinking_text: str = ""
 
 
 class RouteForgeOrchestrator:
@@ -199,6 +200,7 @@ class RouteForgeOrchestrator:
             suggested_scenarios=suggestions,
             diff_refs=diff_refs,
             thinking_tokens=verdict.thinking_tokens,
+            thinking_text=verdict.thinking_text,
         )
 
 
