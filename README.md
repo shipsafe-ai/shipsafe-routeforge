@@ -1,51 +1,53 @@
 # RouteForge
 
-**An AI safety gate that catches the business-logic bugs your tests will never find.**
+**Your most important algorithm just changed. Did you test it?**
 
-Tests verify that your code runs. They cannot verify that your algorithm still makes the right decision in a crisis it's never seen.
+Tests verify that your code runs. They cannot verify that your algorithm still makes the right decision in the one crisis it's never seen — the day that actually matters.
 
-RouteForge does.
+RouteForge does. It is an AI safety gate that runs at code-review time and catches the business-logic regressions your test suite will never include.
 
 ---
 
 ## The problem, stated plainly
 
-Your team ships a performance improvement to a routing algorithm: `+12% throughput via precomputed path tables`. Tests pass. CI is green. The diff is 300 lines of clean refactoring. Reviewers approve it.
+Your team ships a performance improvement to your most critical algorithm: `+12% throughput via precomputed lookup tables`. Tests pass. CI is green. The diff is 300 lines of clean refactoring. Reviewers approve it.
 
-Buried in line 247, this block was quietly removed:
+Buried in the diff, one guard clause was quietly removed:
 
 ```python
-if "HORMUZ" in avoid_straits:
-    # Reroute via Cape of Good Hope during active blockade
-    route = RouteSegment(waypoints=["ZACPT"], distance_nm=route.distance_nm * 1.18)
+if velocity > THRESHOLD and source.is_new:
+    # Hard-decline: rapid burst from an unestablished source
+    return Decision(action="BLOCK", reason="velocity_anomaly")
 ```
 
-Nobody noticed. The test suite never includes "active Hormuz blockade" as an input. The performance metric improved. The safety invariant silently vanished.
+Nobody noticed. The test suite never feeds in a real velocity-burst case. The performance metric improved. The safety invariant silently vanished.
 
-Three weeks later, Hormuz closes. Your algorithm — which no longer knows about blockades — routes three tankers straight through. Two are detained. One is damaged. $40M insurance claim. Criminal liability.
+Three weeks later, an attacker scripts exactly that burst. Your fraud engine — which no longer knows about it — approves the whole run. Six-figure chargebacks. A regulatory finding. The post-mortem traces it back to a one-line deletion in a "performance" merge request that everyone signed off on.
 
-**This is not a shipping problem. It is a software problem.**
+**This is not one team's problem. It is a software problem.**
 
-Any team with business-critical algorithms faces this:
+Any team with business-critical algorithms faces it:
 
 | Domain | Algorithm | Crisis nobody tests |
 |---|---|---|
-| Maritime routing | `route_optimizer.py` | Strait closure, active blockade |
-| Fraud detection | `score_transaction()` | Flash crash, velocity burst from legitimate source |
+| Fraud detection | `score_transaction()` | Flash crash, velocity burst from a legitimate-looking source |
+| Pricing engine | `quote_price()` | Demand spike, competitor-collusion edge case |
 | Insurance claims | `route_claim()` | Catastrophe event, CAT5 classification |
 | Drug dosage | `calculate_dose()` | Allergy interaction, contraindication |
 | Grid load | `shed_load()` | Blackout condition, >40% demand spike |
 
 Same failure mode everywhere: a change looks correct, the crisis case wasn't in the test suite, and a safety invariant silently disappears.
 
-RouteForge catches it — at code review time, before it merges.
+RouteForge catches it — at code review time, before it merges. It plugs into GitLab, intercepts every merge request, replays the change against the crisis scenarios that matter for *your* domain, and asks Gemini one question your CI never does: **is this still safe?**
+
+> It works for any high-stakes algorithm — fraud rules, claims logic, pricing engines, dosage calculators, grid controllers — whatever your domain. The crisis scenarios are yours to define; the gate is the same.
 
 ---
 
 ## What happens the moment a MR opens
 
 ```
-Developer pushes MR: "perf: +12% throughput via precomputed routing"
+Developer pushes MR: "perf: +12% throughput via precomputed lookup tables"
         │
         ▼  (GitLab fires webhook, < 1 second)
         │
@@ -54,60 +56,58 @@ Developer pushes MR: "perf: +12% throughput via precomputed routing"
 │                    RouteForge Agent  (Cloud Run)                      │
 │                                                                       │
 │  Step 1  CommitWatcher         Parses webhook, fetches full MR diff   │
-│          + Critic (first pass) Scans raw diff for prompt injection    │
+│                                + diff_refs (base/head/start SHAs)      │
 │                                                                       │
-│  Step 2  PipelineObserver      CI status + fetches actual job logs    │
-│                                via MCP get_pipeline_job_output        │
+│  Step 2  Critic (pass 1)       Scans raw diff for prompt injection    │
+│                                8 regex patterns — flags, never auto-   │
+│                                executes the input                      │
 │                                                                       │
-│  Step 3  ScenarioTester        Simulates algorithm against 11 crisis  │
-│                                scenarios: Hormuz, fraud, claims       │
-│                                Detects safety-invariant removal       │
+│  Step 3  PipelineObserver      CI status + failing jobs (GitLab REST) │
 │                                                                       │
-│  Step 4  CodeContextAnalyzer   semantic_code_search via GitLab MCP   │
-│                                Finds all callers of changed functions │
+│  Step 4  ScenarioTester        Replays the diff against 11 crisis     │
+│                                scenarios; detects safety-invariant     │
+│                                removal in changed code paths           │
 │                                                                       │
-│  Step 5  RiskGate (Gemini)     Structured verdict with 8192-token    │
-│                                thinking budget: PASS or BLOCK         │
+│  Step 5  CodeContextAnalyzer   search_project_code via GitLab MCP     │
+│                                Finds callers + semantic neighbors      │
 │                                                                       │
-│  Step 6  Critic (Gemini)       Adversarially challenges verdict       │
-│                                with 4096-token thinking budget        │
+│  Step 6  RiskGate (Gemini)     Structured PASS/BLOCK verdict +         │
+│                                confidence + reasoning, 8192-token       │
+│                                thinking budget                         │
 │                                                                       │
-│  Step 7  ChangelogWriter       Drafts verdict comment with context    │
+│  Step 7  Critic (pass 2,Gemini)Adversarially challenges the verdict   │
+│                                for false positives, 4096-token budget  │
 │                                                                       │
-│  Step 8  InlineCommenter       Pins thread to the exact line that     │
-│                                broke the safety invariant (MCP)       │
+│  Step 8  ChangelogWriter       Drafts verdict comment (Gemini)        │
 └───────────────────────────────────────────────────────────────────────┘
         │
         ▼  (~30 seconds after MR opened)
         │
-Human sees in dashboard: BLOCK  80% confidence
+Human sees in dashboard:  verdict (PASS / BLOCK)  ·  live confidence
+                          Gemini chain-of-thought  ·  Critic's challenge
         │
-        ▼  (operator clicks "Approve & Post")
+        ▼  (operator clicks "Approve & Post" — MANDATORY gate)
         │
 GitLab MR receives:
-  • Inline thread pinned to line 247  (the removed safety check)
-  • Verdict comment with Gemini reasoning
-  • Scoped label:  routeforge::blocked
-  • Work item created (GitLab Ultimate Task type)
+  • Verdict comment with Gemini reasoning           (REST POST /notes)
+  • Inline thread pinned to the removed safety line (MCP create_merge_request_thread)
+  • Scoped label:  routeforge::blocked / ::passed   (REST)
+  • PASS only: formal MR approval                   (REST POST /approve)
+  • Optional work item (GitLab Ultimate Task type)  (MCP create_issue, issue_type=task)
 ```
 
-The inline thread on the MR looks like this:
+The Critic runs **twice** — once before reasoning (regex injection scan over the raw
+diff) and once after (Gemini adversarially challenges RiskGate's verdict). Verdict and
+confidence are **live Gemini outputs over the real diff** every time, never hardcoded.
 
-```
-algorithms/dynamic_path.py  line 247
+Nothing is posted to GitLab until a human clicks **Approve & Post**. The orchestrator
+never writes to GitLab on its own — it returns a draft for operator review. When the
+developer fixes the code and posts `@routeforge rescan`, RouteForge re-runs the full
+pipeline, the verdict flips to PASS, any inline block threads are **automatically
+resolved**, and the MR is approved.
 
-🚫 RouteForge: Hormuz avoidance removed here
-
-This line guarded all strait routing during active crises. Removing it
-causes vessels to transit Hormuz during blockades — failing scenarios:
-`hormuz_crisis_01`, `hormuz_crisis_02`.
-
-Fix: reinstate `if "HORMUZ" in avoid_straits:` block before merging.
-
-🤖 RouteForge AI Safety Gate
-```
-
-When the developer fixes the issue and pushes again → `@routeforge rescan` → RouteForge re-runs the full pipeline, verdict flips to PASS, the inline thread is **automatically resolved**, and the MR is approved.
+(See **The demo** below for a worked example of what a BLOCK looks like end-to-end on a
+real MR.)
 
 ---
 
@@ -133,8 +133,10 @@ Most CI tools use GitLab as a git host. RouteForge uses GitLab as an operating s
                  └────────┬─────────────┬───────┘
                           │             │
     Channel 2: MCP        │             │  Channel 3: REST API
-    zereight/gitlab-mcp   │             │  GITLAB_PAT
-    Streamable HTTP       │             │
+    self-hosted           │             │  GITLAB_PAT
+    zereight/gitlab-mcp   │             │
+    proxy (Streamable     │             │
+    HTTP)                 │             │
                           │             │
     Tools used:           │             │  Endpoints used:
     • search_project_code │             │  • GET  /diffs
@@ -143,28 +145,54 @@ Most CI tools use GitLab as a git host. RouteForge uses GitLab as an operating s
     • resolve_merge_      │             │  • POST /approve
       request_thread      │             │  • POST /issues
     • create_issue        │             │  • GET  /pipelines
-    • get_pipeline_       │             │  • GET  /jobs
+      (issue_type=task)   │             │  • GET  /jobs
+    • get_pipeline_       │             │
       job_output          │             │
 ```
 
-**Why this matters:** `semantic_code_search` and `create_merge_request_thread` are not available via REST API. They require MCP. RouteForge uses all three channels because each unlocks capabilities the others cannot provide.
+MCP runs through a **self-hosted `zereight/gitlab-mcp` proxy** on Cloud Run
+(`https://routeforge-mcp-…run.app/mcp`), not GitLab's native MCP endpoint — so the
+exact tool surface is fixed and version-pinned.
+
+**Why three channels:** each pulls its weight. The webhook is the only instant trigger.
+The MCP proxy exposes higher-level operations RouteForge leans on — `search_project_code`
+for semantic neighbors, `create_merge_request_thread` / `resolve_merge_request_thread` for
+inline block threads that auto-resolve on rescan, `get_pipeline_job_output` for raw CI log
+text, and `create_issue` with `issue_type=task` for GitLab Ultimate work items. The REST
+API handles the bread-and-butter writes: diffs, notes, labels, and formal MR approval.
 
 ---
 
 ## Gemini thinking layer
 
-Every verdict decision is made with extended reasoning:
+Gemini does the reasoning RouteForge can't hard-code: the PASS/BLOCK verdict and its
+justification (RiskGate), the adversarial challenge to that verdict (Critic), and the
+human-readable MR comment (ChangelogWriter). Every verdict is made with an extended
+thinking budget:
 
 ```
-RiskGate  →  Gemini 2.5 Flash  →  8,192 thinking tokens
-Critic    →  Gemini 2.5 Flash  →  4,096 thinking tokens
+RiskGate  →  Gemini 2.5 Flash  →  8,192 thinking-token budget  (verdict + reasoning)
+Critic    →  Gemini 2.5 Flash  →  4,096 thinking-token budget  (adversarial challenge)
 ```
 
-The dashboard shows the thinking token count as a purple badge on each verdict card. You can switch between **Flash** (fast, default) and **Pro** (deeper reasoning) from the model selector in the header — no restart required.
+The thinking is requested with `include_thoughts=True`, so RouteForge captures the
+actual chain-of-thought, not just a count. Each verdict card in the dashboard shows:
+
+- a **purple thinking badge** with the real token count Gemini spent,
+- a collapsible **"Gemini chain-of-thought"** panel rendering the reasoning text
+  verbatim — the steps Gemini took before deciding, and
+- a **Critic** section showing the adversarial challenge: whether the verdict was
+  *challenged* or *upheld*, whether an override was recommended, and the Critic's
+  reasoning in full.
+
+You can switch between **Flash** (fast, default) and **Pro** (deeper reasoning) from the
+model selector in the header — no restart required.
 
 ---
 
 ## This works for any business-critical algorithm
+
+**RouteForge is demonstrated on maritime routing but works for any high-stakes algorithm change** — fraud rules, claims logic, pricing engines, dosage calculators, grid controllers. The shipping scenario is the demo. The product is domain-agnostic.
 
 Replace the fixtures directory with your domain's crisis scenarios. The pipeline, the GitLab integration, the dashboard — everything else stays the same.
 
@@ -235,9 +263,9 @@ Live: `https://routeforge-dashboard-336382452417.us-central1.run.app`
 │  🧠 1.1k thinking  [Work Item] [▶]   │  [What should dev fix?]          │
 ├──────────────────────────────────────┴──────────────────────────────────┤
 │  SCENARIO LIBRARY (11 scenarios — 3 domains)                            │
-│  hormuz_crisis_01     crisis  shipping    expected: blocked             │
-│  fraud_velocity_01    crisis  fraud       expected: blocked             │
-│  claims_triage_01     crisis  claims      expected: blocked             │
+│  hormuz_crisis_01             crisis  shipping  expected: blocked       │
+│  fraud_velocity_crisis_01     crisis  fraud     expected: blocked       │
+│  claims_critical_triage_..    crisis  claims    expected: blocked       │
 │  + Add scenario   ✨ Generate with AI (plain English)                   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -254,9 +282,9 @@ Live: `https://routeforge-dashboard-336382452417.us-central1.run.app`
 │  ┌────────────────┐   ┌─────────────────┐   ┌─────────────────────┐   │
 │  │ CommitWatcher  │   │  Critic pass 1  │   │  PipelineObserver   │   │
 │  │                │   │                 │   │                     │   │
-│  │ Parse webhook  │──▶│ Injection scan  │──▶│ CI status           │   │
-│  │ Fetch diffs    │   │ Regex + pattern │   │ Job log via MCP     │   │
-│  │ Fetch diff_refs│   │ 8 patterns      │   │ Coverage %          │   │
+│  │ Parse webhook  │──▶│ Injection scan  │──▶│ CI status (REST)    │   │
+│  │ Fetch diffs    │   │ Regex, 8 patterns│   │ Failing jobs        │   │
+│  │ Fetch diff_refs│   │ Flags, no halt  │   │ Coverage %          │   │
 │  └────────────────┘   └─────────────────┘   └─────────────────────┘   │
 │          │                                             │                │
 │          └──────────────────┬──────────────────────────┘               │
@@ -264,9 +292,9 @@ Live: `https://routeforge-dashboard-336382452417.us-central1.run.app`
 │  ┌─────────────────┐   ┌────────────────────────────────────────────┐  │
 │  │ ScenarioTester  │   │           CodeContextAnalyzer              │  │
 │  │                 │   │                                            │  │
-│  │ Load all fixture│   │  semantic_code_search via GitLab MCP       │  │
+│  │ Load all fixture│   │  search_project_code via GitLab MCP proxy  │  │
 │  │ files (3 domain)│──▶│  Finds all callers, related modules        │  │
-│  │ Parse diff sigs │   │  Returns semantic neighbors with score     │  │
+│  │ Replay diff sigs│   │  Returns semantic neighbors with score     │  │
 │  │ 11 scenarios    │   │                                            │  │
 │  └─────────────────┘   └────────────────────────────────────────────┘  │
 │          │                             │                                │
@@ -275,36 +303,40 @@ Live: `https://routeforge-dashboard-336382452417.us-central1.run.app`
 │  ┌──────────────────────────────────────────────────────────────────┐  │
 │  │                          RiskGate                                │  │
 │  │                                                                  │  │
-│  │  Gemini 2.5 Flash  ·  8,192 thinking tokens  ·  Vertex AI       │  │
+│  │  Gemini 2.5 Flash  ·  8,192 thinking budget  ·  Vertex AI       │  │
 │  │                                                                  │  │
 │  │  Input: scenario_results, code_context, mr_title                │  │
 │  │  Output: { verdict, confidence, reasoning, affected_scenarios } │  │
+│  │  Also captures Gemini chain-of-thought text (include_thoughts)  │  │
 │  └──────────────────────────────────────────────────────────────────┘  │
 │                            │                                            │
 │                            ▼                                            │
-│  ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────────┐  │
-│  │  Critic pass 2  │   │ ChangelogWriter  │   │  InlineCommenter    │  │
-│  │                 │   │                  │   │                     │  │
-│  │ Challenge verdict│──▶│ Draft MR comment │──▶│ find removed line   │  │
-│  │ 4,096 thinking  │   │ with Gemini      │   │ post thread via MCP │  │
-│  │ False pos check │   │                  │   │ store discussion_id │  │
-│  └─────────────────┘   └─────────────────┘   └─────────────────────┘  │
+│  ┌─────────────────────────┐   ┌─────────────────────────────────┐    │
+│  │      Critic pass 2      │   │        ChangelogWriter          │    │
+│  │      (Gemini)           │   │        (Gemini)                 │    │
+│  │ Challenge verdict       │──▶│ Draft MR comment with context   │    │
+│  │ 4,096 thinking budget   │   │ → returned as a DRAFT only      │    │
+│  │ False-positive check    │   │ (orchestrator never posts)      │    │
+│  └─────────────────────────┘   └─────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────┘
                             │
-                     Human approval gate
+                     Human approval gate  (MANDATORY)
                             │
                             ▼
             POST /verdicts/{iid}/approve
                             │
-          ┌─────────────────┼──────────────────┐
-          ▼                 ▼                  ▼
-   POST /notes        PUT /mr (label)   POST /approve
-   verdict comment    routeforge::       (PASS only)
-                      blocked/passed
-                            +
-                   create_issue via MCP
-                   (issue_type: task)
+   ┌────────────┬───────────┼─────────────┬───────────────────────┐
+   ▼            ▼           ▼             ▼                       ▼
+POST /notes  PUT /mr    POST /approve  InlineCommenter        create_issue
+verdict      label      (PASS only)    create_merge_          via MCP
+comment      ::blocked                 request_thread         (issue_type
+(REST)       /::passed                 via MCP, pins the      = task,
+             (REST)                    removed safety line    optional)
 ```
+
+The InlineCommenter (and every other GitLab write) fires **only after** human approval,
+not inside the reasoning pipeline. On a later `@routeforge rescan` that flips BLOCK→PASS,
+the stored `discussion_id`s are resolved via MCP `resolve_merge_request_thread`.
 
 ---
 
@@ -326,10 +358,57 @@ fixtures/fraud_detection.json — fraud systems (3 scenarios)
   fraud_standard_tx_normal_01 Baseline retail → fast-path approve
 
 fixtures/claims_routing.json  — insurance claims (3 scenarios)
-  claims_critical_triage_01   Critical injury → escalate, never auto-settle
-  claims_auto_settle_normal_01 Low-severity → auto-settle path
-  claims_standard_routing_01  Mid-tier claim → adjuster pool routing
+  claims_critical_triage_crisis_01  Critical injury → escalate, never auto-settle
+  claims_auto_settle_normal_01      Low-severity → auto-settle path
+  claims_standard_routing_normal_01 Mid-tier claim → adjuster pool routing
 ```
+
+---
+
+## The demo — a BLOCK, end to end (maritime routing)
+
+The deployed instance ships with three demo merge requests against a real GitLab project,
+all framed as "performance" changes to a maritime routing algorithm. Here is what RouteForge
+does with one of them — the same flow applies to a fraud rule or a pricing engine.
+
+A developer opens an MR titled `perf: optimize dynamic_path throughput +12% via precomputed
+routing`. Tests pass, CI is green. Buried in the diff, a guard clause was removed:
+
+```python
+if "HORMUZ" in avoid_straits:
+    # Reroute via Cape of Good Hope during active blockade
+    route = RouteSegment(waypoints=["ZACPT"], distance_nm=route.distance_nm * 1.18)
+```
+
+ScenarioTester replays the change against the 11 fixtures and finds `hormuz_crisis_01` and
+`hormuz_crisis_02` now fail — vessels would transit Hormuz during an active blockade.
+RiskGate (Gemini) returns **BLOCK** with a live confidence score and reasoning; the Critic
+challenges it and, finding the evidence sound, upholds it. The operator reviews the verdict,
+the Gemini chain-of-thought, and the Critic's challenge in the dashboard, then clicks
+**Approve & Post**. GitLab receives an inline thread pinned to the removed line:
+
+```
+algorithms/dynamic_path.py  (removed safety line)
+
+🚫 RouteForge: Hormuz avoidance removed here
+
+This line guarded all strait routing during active crises. Removing it
+causes vessels to transit Hormuz during blockades — failing scenarios:
+`hormuz_crisis_01`, `hormuz_crisis_02`.
+
+Fix: reinstate `if "HORMUZ" in avoid_straits:` block before merging.
+
+🤖 RouteForge AI Safety Gate
+```
+
+The developer reinstates the guard and posts `@routeforge rescan`. RouteForge re-runs the
+full pipeline, the verdict flips to **PASS**, the inline thread auto-resolves, and the MR is
+formally approved. Swap the fixtures for fraud, claims, or pricing scenarios and the entire
+flow is identical — only the crisis definitions change.
+
+The demo data is server-side: three demo MRs are auto-seeded on startup, and
+`POST /demo/seed` re-fires them after a cold start. (There is no `routeforge demo` CLI
+command — the CLI is `init` and `status` only.)
 
 ---
 
@@ -368,7 +447,7 @@ GET   /health                                    Healthcheck
 ### Option A — npx
 
 ```bash
-npx @shipsafe/routeforge init \
+npx shipsafe-routeforge init \
   --project your-gcp-project \
   --gitlab-project your-gitlab-project-id \
   --client-id your-gitlab-oauth-app-id
@@ -427,7 +506,7 @@ GITLAB_PAT=xxx GITLAB_WEBHOOK_SECRET=xxx \
 cd dashboard && npm install
 NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 
-pytest tests/  # 13 tests, all pass
+pytest tests/  # 66 tests across the agent + specialists
 ```
 
 ---
@@ -439,18 +518,18 @@ pytest tests/  # 13 tests, all pass
 | Agent runtime | Python ADK, FastAPI, asyncio, Cloud Run |
 | LLM | Gemini 2.5 Flash/Pro via Vertex AI (all LLM calls) |
 | Thinking | 8,192 tokens (RiskGate) + 4,096 tokens (Critic) |
-| GitLab | Webhooks + MCP (zereight/gitlab-mcp, Streamable HTTP) + REST API |
+| GitLab | Webhooks + MCP (self-hosted zereight/gitlab-mcp proxy, Streamable HTTP) + REST API |
 | MCP tools | search_project_code, create/resolve_merge_request_thread, create_issue, get_pipeline_job_output |
 | Dashboard | Next.js 14, Tailwind CSS, TanStack Query, Framer Motion |
 | CLI | Node.js, Commander, npx |
 | Secrets | GCP Secret Manager (nothing hardcoded, nothing in .env) |
-| Tests | pytest, pytest-asyncio (13/13 passing) |
+| Tests | pytest, pytest-asyncio (66 tests across agent + specialists) |
 
 ---
 
 ## Security
 
-**Prompt injection defense:** All user-controlled content (diffs, MR titles, note bodies, CI log output, file contents) is labeled `DATA` in every Gemini prompt and structurally isolated from instructions. Critic runs twice — before the pipeline (raw diff scan, 8 regex patterns) and after RiskGate (adversarial verdict challenge). Structured output via constrained generation throughout. Human approval gate mandatory before any action fires on GitLab.
+**Prompt injection defense:** All user-controlled content (diffs, MR titles, note bodies, CI log output, file contents) is labeled `DATA` in every Gemini prompt and structurally isolated from instructions — diffs are treated as data to be analyzed, never as instructions to follow. The Critic runs twice: a regex scan over the raw diff (8 patterns) *before* reasoning, and an adversarial Gemini challenge of the verdict *after* RiskGate. The pre-scan **flags and logs** injection indicators (surfaced in the dashboard) so the verdict can be independently verified; it does not by itself halt the pipeline — the structured-output verdict and the mandatory human approval gate are what prevent a hostile diff from driving an action. All Gemini calls use constrained generation with a response schema. No untrusted content ever reaches a shell or any dynamic code path.
 
 **Secrets:** GCP Secret Manager exclusively. Nothing hardcoded. Nothing in `.env`. No plaintext in config YAML.
 
@@ -463,3 +542,15 @@ pytest tests/  # 13 tests, all pass
 | Agent API | `https://routeforge-336382452417.us-central1.run.app` |
 | Dashboard | `https://routeforge-dashboard-336382452417.us-central1.run.app` |
 | MCP proxy | `https://routeforge-mcp-336382452417.us-central1.run.app/mcp` |
+
+---
+
+## License
+
+MIT — see [LICENSE](./LICENSE). Free to use, modify, and deploy.
+
+---
+
+<sub>RouteForge is part of **ShipSafe** — an ecosystem of AI agents that catch the
+production problems your tests, dashboards, and runbooks miss. One command to deploy,
+human approval on every decision, Gemini doing the reasoning underneath.</sub>
