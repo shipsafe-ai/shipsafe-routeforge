@@ -42,6 +42,8 @@ RouteForge catches it — at code review time, before it merges. It plugs into G
 
 > It works for any high-stakes algorithm — fraud rules, claims logic, pricing engines, dosage calculators, grid controllers — whatever your domain. The crisis scenarios are yours to define; the gate is the same.
 
+![Without RouteForge the CI is green, the tests never ran the crisis, and the unsafe merge ships; with RouteForge it runs the changed algorithm, Gemini blocks the unsafe merge, and a human approves before anything posts to GitLab](docs/problem-solution.png)
+
 ---
 
 ## What happens the moment a MR opens
@@ -113,6 +115,8 @@ real MR.)
 
 ## GitLab integration — three channels, not one
 
+![System architecture — GitLab fires a webhook into the FastAPI agent on Cloud Run; the orchestrator (Google ADK) reasons with Gemini on Vertex AI and the GitLab MCP, and posts back over the REST API only after human approval](docs/architecture-overview.png)
+
 Most CI tools use GitLab as a git host. RouteForge uses GitLab as an operating surface.
 
 ```
@@ -164,6 +168,8 @@ API handles the bread-and-butter writes: diffs, notes, labels, and formal MR app
 ---
 
 ## Gemini thinking layer
+
+![Gemini as the brain — the MR diff and scenario results flow into the Gemini RiskGate (8192 thinking tokens) for a PASS/BLOCK verdict, then a Gemini Critic challenges it; every diff is treated as DATA and nothing posts to GitLab until a human approves](docs/gemini-data-flow.png)
 
 Gemini does the reasoning RouteForge can't hard-code: the PASS/BLOCK verdict and its
 justification (RiskGate), the adversarial challenge to that verdict (Critic), and the
@@ -273,6 +279,8 @@ Live: `https://routeforge-dashboard-336382452417.us-central1.run.app`
 ---
 
 ## Agent pipeline — full detail
+
+![RouteForge pipeline — CommitWatcher, PipelineObserver, ScenarioTester, CodeContextAnalyzer and RiskGate (Gemini) under the orchestrator, then a Gemini Critic and ChangelogWriter, gated by a human before anything posts to GitLab](docs/architecture-pipeline.png)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -407,8 +415,8 @@ formally approved. Swap the fixtures for fraud, claims, or pricing scenarios and
 flow is identical — only the crisis definitions change.
 
 The demo data is server-side: three demo MRs are auto-seeded on startup, and
-`POST /demo/seed` re-fires them after a cold start. (There is no `routeforge demo` CLI
-command — the CLI is `init` and `status` only.)
+`POST /demo/seed` re-fires them after a cold start. The npm CLI
+`npx shipsafe-routeforge demo` re-seeds those MRs and polls the verdicts for you.
 
 ---
 
@@ -444,20 +452,16 @@ GET   /health                                    Healthcheck
 
 ## Install
 
-### Option A — npx
+### Option A — npx (against the deployed instance)
 
 ```bash
-npx shipsafe-routeforge init \
-  --project your-gcp-project \
-  --gitlab-project your-gitlab-project-id \
-  --client-id your-gitlab-oauth-app-id
+npx shipsafe-routeforge init      # deployed URLs + health check
+npx shipsafe-routeforge demo      # re-seed the demo MRs and show the verdicts
+npx shipsafe-routeforge status    # latest verdicts (PASS/BLOCK + confidence)
+npx shipsafe-routeforge connect   # how to point at your own GitLab project
 ```
 
-Opens GitLab OAuth, captures token, stores secrets in GCP Secret Manager, prints deploy command and webhook URL.
-
-**Pre-requisite:** Create a GitLab OAuth Application at `GitLab → Profile → Applications`:
-- Redirect URI: `http://localhost:9876/callback`
-- Scopes: `api read_api read_repository`
+To deploy your **own** instance against your GitLab (OAuth app + secrets), use Option B below.
 
 ### Option B — manual
 
