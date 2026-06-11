@@ -13,7 +13,7 @@ Your team ships a performance improvement to your most critical algorithm — `+
 
 "The tests passed" is not "this is safe." Tests verify your code *runs*; they can't verify your algorithm still makes the right call in the one crisis it's never seen — the day that actually matters. We built the gate that does.
 
-![Problem vs solution](problem-solution.png)
+![Problem vs solution](https://raw.githubusercontent.com/shipsafe-ai/shipsafe-routeforge/main/docs/problem-solution.png)
 
 ## What it does
 
@@ -27,11 +27,11 @@ Eight pipeline steps on **Google ADK**, on **Cloud Run**, with **Gemini on Verte
 
 **System architecture — GitLab as an operating surface, three channels:**
 
-![System architecture](architecture-overview.png)
+![System architecture](https://raw.githubusercontent.com/shipsafe-ai/shipsafe-routeforge/main/docs/architecture-overview.png)
 
 **The pipeline** — `CommitWatcher → PipelineObserver → ScenarioTester → CodeContextAnalyzer → RiskGate (Gemini) → Critic (Gemini) → ChangelogWriter`, gated by a human:
 
-![Multi-agent pipeline](architecture-pipeline.png)
+![Multi-agent pipeline](https://raw.githubusercontent.com/shipsafe-ai/shipsafe-routeforge/main/docs/architecture-pipeline.png)
 
 ```mermaid
 flowchart TD
@@ -53,7 +53,7 @@ flowchart TD
 
 **Gemini is the brain** — the diff and scenario results become a typed PASS/BLOCK verdict with an 8192-token thinking budget, then a Gemini Critic adversarially challenges it:
 
-![Gemini reasoning flow](gemini-data-flow.png)
+![Gemini reasoning flow](https://raw.githubusercontent.com/shipsafe-ai/shipsafe-routeforge/main/docs/gemini-data-flow.png)
 
 RouteForge uses GitLab through **three channels**: a **webhook** (instant trigger on MR / note / pipeline events), the **MCP** (a self-hosted `zereight/gitlab-mcp` proxy — `search_project_code`, resolvable inline threads, work items, CI job logs), and the **REST API** (diffs, notes, scoped labels, formal MR approval).
 
