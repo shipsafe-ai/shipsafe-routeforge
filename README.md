@@ -103,10 +103,16 @@ diff) and once after (Gemini adversarially challenges RiskGate's verdict). Verdi
 confidence are **live Gemini outputs over the real diff** every time, never hardcoded.
 
 Nothing is posted to GitLab until a human clicks **Approve & Post**. The orchestrator
-never writes to GitLab on its own — it returns a draft for operator review. When the
-developer fixes the code and posts `@routeforge rescan`, RouteForge re-runs the full
-pipeline, the verdict flips to PASS, any inline block threads are **automatically
-resolved**, and the MR is approved.
+never writes to GitLab on its own — it returns a draft for operator review.
+
+**The full loop, closed inside GitLab:**
+1. Developer fixes the code.
+2. Posts `@routeforge rescan` as a comment on the MR.
+3. RouteForge re-runs the full 8-step pipeline against the new diff.
+4. Verdict flips to PASS — the inline block thread **auto-resolves** via MCP.
+5. MR is formally approved via the GitLab Approvals API.
+
+No tab-switching, no manual thread cleanup. The developer stays in GitLab throughout.
 
 (See **The demo** below for a worked example of what a BLOCK looks like end-to-end on a
 real MR.)
@@ -212,12 +218,14 @@ fixtures/
 
 Each fixture file defines what the algorithm **must** do in a crisis, and what `critical_keywords_removed` from the diff would indicate the safety invariant was deleted.
 
-Gemini can generate new scenarios from plain English:
+**Gemini generates new fixtures from plain English** — no JSON authoring required. Type a description in the dashboard scenario panel or call the API directly:
 
 ```bash
 curl -X POST /scenarios/your-project/generate \
   -d '{"description": "What if both Suez and Hormuz close during LNG peak demand?"}'
 ```
+
+Gemini returns a complete fixture JSON — `strait_id`, `crisis_mode`, `cargo_type`, `expected_outcome`, `critical_keywords_removed` — ready to save to the library with one click.
 
 ---
 
@@ -235,6 +243,14 @@ Post a comment on any MR to interact directly inside GitLab:
 ```
 
 `rescan` is the full feedback loop: developer fixes the code, posts `@routeforge rescan`, RouteForge re-runs, verdict flips to PASS, inline threads resolve automatically, MR is approved.
+
+---
+
+## Chat panel
+
+The dashboard includes a **context-aware chat panel** backed by Gemini. When a developer asks "Why was this blocked?" or "What do I fix?", Gemini answers with the actual diff, scenario results, RiskGate reasoning, and Critic challenge already loaded as context — not a generic docs response, a direct answer about this specific change and what the fix is.
+
+Suggested prompts are pre-filled in the panel (`Explain last BLOCK`, `What scenarios failed?`, `What should the developer fix?`). Free-form questions work too — including cross-MR questions like "Which MRs have touched the Hormuz logic in the last week?"
 
 ---
 

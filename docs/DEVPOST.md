@@ -21,6 +21,10 @@ RouteForge is an AI safety gate that runs at **code-review time**. It plugs into
 
 It returns a structured **PASS / BLOCK** verdict with a confidence score and visible reasoning, pins an **inline thread on the exact removed line**, and — critically — **posts nothing to GitLab until a human approves**. When the developer fixes the code and comments `@routeforge rescan`, the pipeline re-runs, the verdict flips to PASS, and the inline thread auto-resolves.
 
+The developer can also ask the dashboard directly: "Why was this blocked?" or "What do I fix?" — a **chat panel** backed by Gemini answers in full context, with the diff, scenario results, and RiskGate reasoning already loaded. Not a docs page; a conversation about this specific change.
+
+RouteForge ships **11 crisis scenarios across three domains** — shipping (Hormuz blockade, Cape reroute), fraud detection (velocity attacks, high-value transactions), insurance claims (critical triage, auto-settle). Teams extend coverage without writing JSON by hand: describe a new scenario in plain English and **Gemini generates the fixture**.
+
 ## How we built it
 
 Eight pipeline steps on **Google ADK**, on **Cloud Run**, with **Gemini on Vertex AI** doing the reasoning.
@@ -73,6 +77,8 @@ RouteForge uses GitLab through **three channels**: a **webhook** (instant trigge
 - **Visible chain-of-thought + an adversarial Critic** make every BLOCK explainable.
 - A genuine **three-channel GitLab integration** with inline threads that auto-resolve on `@routeforge rescan`.
 - **Nothing posts to GitLab until a human approves.**
+- A **context-aware chat panel**: the developer asks "Why was this blocked?" or "What do I fix?" and Gemini answers with the actual diff, scenario results, and RiskGate reasoning already in scope — not generic docs.
+- **11 crisis scenarios across three domains ship out of the box**, and teams extend coverage by describing a new scenario in plain English — Gemini generates the fixture JSON.
 
 ## What we learned
 
@@ -83,7 +89,7 @@ RouteForge uses GitLab through **three channels**: a **webhook** (instant trigge
 
 ## What's next for RouteForge
 
-- Auto-generate domain scenarios from a repo's own history.
+- Auto-generate scenarios from a repo's own incident history — not just a description, but mined from past post-mortems.
 - One click: open the proposed fix as a merge request.
 - Multi-repo / monorepo path-scoped gating.
 - Deeper static analysis to localize the exact removed invariant automatically.
